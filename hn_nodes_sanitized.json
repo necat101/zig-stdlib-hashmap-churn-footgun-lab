@@ -1,0 +1,501 @@
+{
+  "id": 38224033,
+  "by": "kencausey",
+  "text": null,
+  "time": 1699647903,
+  "kids": [
+    {
+      "id": 38227693,
+      "by": "senderista",
+      "text": "I don&#x27;t see a compelling reason to use tombstones in linear probing except in a concurrent context (where you can&#x27;t move entries around). The tombstone-free deletion algorithm is quite simple: <a href=\"https:&#x2F;&#x2F;github.com&#x2F;senderista&#x2F;hashtable-benchmarks&#x2F;blob&#x2F;master&#x2F;src&#x2F;main&#x2F;java&#x2F;set&#x2F;int64&#x2F;LPLongHashSet.java#L184\">https:&#x2F;&#x2F;github.com&#x2F;senderista&#x2F;hashtable-benchmarks&#x2F;blob&#x2F;mast...</a>. No rehashing is necessary.",
+      "time": 1699677804,
+      "kids": [
+        {
+          "id": 38228959,
+          "by": "JacksonAllan",
+          "text": "findPreferredBucket rehashes. The problem with this deletion algorithm is that every element that is a candidate for back-shifting must be rehashed to ensure that we don&#x27;t shift it back beyond its home bucket (unlike in Robin Hood probing, where probe lengths already give us this information). Hence, it is pretty unsuitable when the hash function is expensive, unless we&#x27;re storing hash codes or keeping the load factor very low. This image - <a href=\"https:&#x2F;&#x2F;ibb.co&#x2F;xSytxHF\" rel=\"nofollow noreferrer\">https:&#x2F;&#x2F;ibb.co&#x2F;xSytxHF</a> - shows a benchmark of a few hash tables with string keys and a maximum load factor of 0.95. Guess which one is using linear probing with back-shift deletion.",
+          "time": 1699697541,
+          "kids": [
+            {
+              "id": 38231559,
+              "by": "senderista",
+              "text": "Recalculating the hash codes is indeed potentially expensive. In my example the table stores the hash codes themselves instead of the keys (because the hash function is invertible), so the hash function never needs to be recalculated (just the preferred bucket based on the hash, which is extremely cheap). With a different algorithm (Robin Hood or bidirectional linear probing), the load factor can be kept well over 90% with good performance, as the benchmarks in the same repo demonstrate.",
+              "time": 1699719250,
+              "kids": [
+                {
+                  "id": 38240609,
+                  "by": "JacksonAllan",
+                  "text": "<i>In my example the table stores the hash codes themselves instead of the keys (because the hash function is invertible)</i><p>Oh, I see, right. If determining the home bucket is trivial, then the back-shifting method is great. The issue is just that it\u2019s not as much of a general-purpose solution as it may initially seem. In the bad cases, it&#x27;s <i>really</i> bad.<p><i>With a different algorithm (Robin Hood or bidirectional linear probing), the load factor can be kept well over 90% with good performance, as the benchmarks in the same repo demonstrate.</i><p>I\u2019ve seen the 90% claim made several times in literature on Robin Hood hash tables. In my experience, the claim is a bit exaggerated, although I suppose it depends on what our idea of \u201cgood performance\u201d is. See these benchmarks, which again go up to a maximum load factor of 0.95 (although boost and Absl forcibly grow&#x2F;rehash at 0.85-0.9):<p><a href=\"https:&#x2F;&#x2F;strong-starlight-4ea0ed.netlify.app&#x2F;\" rel=\"nofollow noreferrer\">https:&#x2F;&#x2F;strong-starlight-4ea0ed.netlify.app&#x2F;</a><p>Tsl, Martinus, and CC are all Robin Hood tables (<a href=\"https:&#x2F;&#x2F;github.com&#x2F;Tessil&#x2F;robin-map\">https:&#x2F;&#x2F;github.com&#x2F;Tessil&#x2F;robin-map</a>, <a href=\"https:&#x2F;&#x2F;github.com&#x2F;martinus&#x2F;robin-hood-hashing\">https:&#x2F;&#x2F;github.com&#x2F;martinus&#x2F;robin-hood-hashing</a>, and <a href=\"https:&#x2F;&#x2F;github.com&#x2F;JacksonAllan&#x2F;CC\">https:&#x2F;&#x2F;github.com&#x2F;JacksonAllan&#x2F;CC</a>, respectively). Absl (from Google) and Boost are well-known C++ SIMD-based hash tables. Khash (<a href=\"https:&#x2F;&#x2F;github.com&#x2F;attractivechaos&#x2F;klib&#x2F;blob&#x2F;master&#x2F;khash.h\">https:&#x2F;&#x2F;github.com&#x2F;attractivechaos&#x2F;klib&#x2F;blob&#x2F;master&#x2F;khash.h</a>) is, I think, an ordinary open-addressing table using quadratic probing. Fastmap is a new, yet-to-be-published design that is fundamentally similar to bytell (<a href=\"https:&#x2F;&#x2F;www.youtube.com&#x2F;watch?v=M2fKMP47slQ\">https:&#x2F;&#x2F;www.youtube.com&#x2F;watch?v=M2fKMP47slQ</a>) but also incorporates some aspects of the aforementioned SIMD maps (in particular, it stores a 4-bit fragment of the hash code to avoid most false key comparisons).<p>As you can see, all the Robin Hood maps spike upwards dramatically as the load factor gets high, becoming as much as 5-6 times slower at 0.95 vs 0.5 in one of the benchmarks (uint64_t key, 256-bit struct value: Total time to erase 1000 existing elements with N elements in map). Only the SIMD maps (with Boost being the clear better performer of the two) and Fastmap appear mostly immune to load factor in all benchmarks, although the SIMD maps do - I believe - use tombstones for deletion in at least some cases.<p>I\u2019ve only read briefly about bi-directional linear probing \u2013 never experimented with it.",
+                  "time": 1699801097,
+                  "kids": [
+                    {
+                      "id": 38255940,
+                      "by": "senderista",
+                      "text": "Thanks for the benchmark references.<p>I would be curious what you think of my benchmarks of RH and BLP: <a href=\"https:&#x2F;&#x2F;github.com&#x2F;senderista&#x2F;hashtable-benchmarks&#x2F;wiki&#x2F;64-bit-benchmarks\">https:&#x2F;&#x2F;github.com&#x2F;senderista&#x2F;hashtable-benchmarks&#x2F;wiki&#x2F;64-b...</a>. BLP performance seems much more stable than RH in general. I haven&#x27;t directly compared BLP to SIMD designs (since the impl is in Java), but would like to do so at some point. At any rate, I haven&#x27;t yet found any reason to use RH rather than BLP (note that a BLP impl could store preferred bucket index, truncated hash code, distance from preferred bucket, etc., just like RH).",
+                      "time": 1699912689,
+                      "kids": [
+                        {
+                          "id": 38257882,
+                          "by": "JacksonAllan",
+                          "text": "As I\u2019m sure you know, benchmarking hash tables is pretty difficult because there\u2019s many variables that affect their performance and it\u2019s hard to cover all use cases. Let me start by explaining the benchmarks I linked you to earlier. Eventually they will be open-sourced and published as part of a comprehensive review of C (and some C++) hash tables, but that\u2019s potentially months away now that there is a war in Gaza keeping me very busy in my day job.<p>The &quot;uint32_t key, uint32_t value&quot; benchmarks test how the hash tables perform when the hash function and key comparison function are inexpensive, traversing buckets is inexpensive (i.e. does not cause many cache misses), and moving elements is cheap. These benchmarks disadvantage tables that store metadata in a separate array (which here are Absl, Boost, Martinus, and Fastmap) because doing so necessarily causes at least one extra cache miss per lookup.<p>The &quot;uint64_t key, 256-bit struct&quot; value benchmarks test how the tables perform when the hash function and key comparison function are inexpensive, traversing buckets is expensive (a cache miss per bucket), and moving elements is expensive. These benchmarks disadvantage tables that don\u2019t store metadata in a separate array (or do but access the buckets array with every probe anyway to check the key) and that move elements around a lot (e.g. Robin Hood).<p>The &quot;16-char NULL-terminated string key, uint64_t value&quot; benchmarks test how tables perform when the hash function and key comparison function are expensive. These benchmarks disadvantage hash tables that lack a (metadata) mechanism to avoid most key comparisons or do a lot of rehashing (this is where the performance of the liner-probing&#x2F;back-shift-deletion tables goes nuclear if they\u2019re not storing hash codes or home bucket indices).<p>As I mentioned earlier, in these benchmarks the max load factor is set to 95% (although the SIMD tables rehash early even after we modify the fixed max load factors hard-coded into the libraries). Measurements are taken at intervals of 50k. Each data point is the average of five runs. We can make the lines smoother, and therefore make the benchmarks more readable, by upping the runs to ten or more (although adding more runs hides the variability of the maps that suffer from this problem \u2013 e.g. notice how Khash\u2019s plots are usually much more squiggly than those of the other tables?). This approach allows us to see the performance of each map across the whole spectrum of load factors from about 0.48 (the troughs) to 0.95 (the peaks).<p>Of course, these benchmarks don\u2019t cover all cases and combinations \u2013 just a hopefully representative sample. They also don\u2019t show memory usage (in general, the SIMD maps have one or one-and-a-fraction of a byte of overhead per bucket, Fastmap has two bytes, and the Robin Hood maps should have anywhere from two to eight bytes). They also don\u2019t show the effect of tombstones when we do lots of deletions (e.g. the \u201cerasure\u201d benchmarks don\u2019t show why the tombstoneless Fastmap may be superior to Boost in this regard).<p>Now, on to your benchmarks, which I had a quick look at earlier and again just now:<p>The first thing that jumps out at me is that it looks like you\u2019re only testing longs as keys. In other words, you appear to only be covering the first scenario - perhaps the ideal scenario for an open-addressing table - that I described above: the hash function and key comparison function are inexpensive, traversing buckets is inexpensive, and moving elements is cheap. Your results may well vary when you change any of these variables.<p>The second thing I\u2019m concerned about is the way you handle load factor and measurement intervals. Take your \u201cAverage time for successful lookup (90% load factor)\u201d benchmark, for example. Are you just setting the max load factor to 90% and then measuring at 10k, 100k, 1m, 10m, and 100m elements? If so, then you\u2019re not measuring the tables at a 90% load factor \u2013 you\u2019re measuring them at whatever their load factors <i>happen</i> to be at those intervals. This might explain, for example, why the measurement of the Robin Hood map at 1m is so radically different from its measurement at 10m in that benchmark, or why your plots look like bell curves in your \u201cAverage time for successful lookup (99% load factor)\u201d benchmark. If I\u2019m right, then I think you need to either use a much smaller measurement interval so that you actually capture the performance near the target load or benchmark the tables not at element-count intervals but when they approach the target load factor. If you do the former (as I do), then there might not be any need for the separate lower-max-load-factor benchmarks because the highest-max-load-factor benchmarks will \u2013 as I mentioned earlier \u2013 also show the performance at lower load factors.<p>Of course, it\u2019s nice that your horizontal scale is exponential, not linear like mine. For my benchmarks, I\u2019m basically assuming that the trends we can clearly see for the 0-20m range will continue at higher element counts (I can\u2019t see why they wouldn\u2019t, and the difference made by slightly more cache misses as the element count grows should become less and less apparent at higher counts).<p>Anyway, that&#x27;s my 2c - hope it&#x27;s helpful. Let me know if you have any suggestions regarding my benchmarks. I followed you on GitHub so that I can share some more comprehensive (i.e. many more C and C++ hash tables) benchmarks with you once I have time to run the full suite again (it takes a few hours, and I only have one computer).",
+                          "time": 1699926311,
+                          "kids": [
+                            {
+                              "id": 38264271,
+                              "by": "senderista",
+                              "text": "Thanks for the details on your benchmarks. I would like sometime to extend BLP to a more generic setting; as I said I think any trick used with RH would also work with BLP. I just used an integer set because that&#x27;s all I needed for my use case and it was easy to implement several different approaches for benchmarking. As you note, it favors use cases where the hash function is cheap (or invertible) and elements are cheap to move around.<p>About your question on load factors: no, the benchmarks are measuring exactly what they claim to be. The hash table constructor divides max data size by load factor to get the table size (<a href=\"https:&#x2F;&#x2F;github.com&#x2F;senderista&#x2F;hashtable-benchmarks&#x2F;blob&#x2F;master&#x2F;src&#x2F;main&#x2F;java&#x2F;set&#x2F;int64&#x2F;LPLongHashSet.java#L31\">https:&#x2F;&#x2F;github.com&#x2F;senderista&#x2F;hashtable-benchmarks&#x2F;blob&#x2F;mast...</a>), and the benchmark code instantiates each hash table for exactly the measured data set size and load factor (<a href=\"https:&#x2F;&#x2F;github.com&#x2F;senderista&#x2F;hashtable-benchmarks&#x2F;blob&#x2F;master&#x2F;src&#x2F;jmh&#x2F;java&#x2F;set&#x2F;int64&#x2F;Benchmarks.java#L84\">https:&#x2F;&#x2F;github.com&#x2F;senderista&#x2F;hashtable-benchmarks&#x2F;blob&#x2F;mast...</a>).<p>I can&#x27;t explain the peaks around 1M in many of the plots; I didn&#x27;t investigate them at the time and I don&#x27;t have time now. It could be a JVM artifact, but I did try to use JMH &quot;best practices&quot;, and there&#x27;s no dynamic memory allocation or GC happening during the benchmark at all. It would be interesting to port these tables to Rust and repeat the measurements with Criterion. For more informative graphs I might try a log-linear approach: divide the intervals between the logarithmically spaced data sizes into a fixed number of subintervals (say 4).",
+                              "time": 1699975022,
+                              "kids": [
+                                {
+                                  "id": 38272354,
+                                  "by": "JacksonAllan",
+                                  "text": "I&#x27;ll try to download and play around with your benchmarks when I have a chance. After reading you explanation of how you create the tables at the desired load factor, some of those plots definitely look rather odd to me. What I&#x27;d expect to see across all your benchmarks is a bunch of upward curves tapering off at the top (or perhaps just an upward liner lines, given that your horizontal scale is exponential). Basically, the performance of a given table at the same load factor should be fundamentally similar irrespective of how many elements are in the table, <i>except</i> that the higher the count gets, the less frequently the table will benefit from incidental cache hits when consecutive lookups coincidentally hit the same part of the buckets arrays. You can see this in my benchmarks (except for the cumulative &quot;Total time to insert N nonexisting elements&quot; benchmarks and the iteration benchmarks, which are a whole other can of worms). Notice how my peaks grow higher with the element count but tapper off on the right-hand side? In contrast, your plots&#x27; data points (which I think should be analogous to the peaks in my graphs) seem to jump around, with the high-element-count points often appearing <i>lower</i> than the low-element count ones. This seems very unexpected.<p>H\u0335e\u0335r\u0335e\u0335&#x27;\u0335s\u0335 \u0335o\u0335n\u0335e\u0335 \u0335i\u0335d\u0335e\u0335a\u0335:\u0335 \u0335I\u0335t\u0335&#x27;\u0335s\u0335 \u0335b\u0335e\u0335e\u0335n\u0335 \u0335m\u0335a\u0335n\u0335y\u0335 \u0335y\u0335e\u0335a\u0335r\u0335s\u0335 \u0335s\u0335i\u0335n\u0335c\u0335e\u0335 \u0335I\u0335 \u0335t\u0335o\u0335u\u0335c\u0335h\u0335e\u0335d\u0335 \u0335J\u0335a\u0335v\u0335a\u0335.\u0335 \u0335H\u0335o\u0335w\u0335 \u0335d\u0335o\u0335e\u0335s\u0335 \u0335J\u0335a\u0335v\u0335a\u0335&#x27;\u0335s\u0335 \u0335g\u0335a\u0335r\u0335b\u0335a\u0335g\u0335e\u0335 \u0335c\u0335o\u0335l\u0335l\u0335e\u0335c\u0335t\u0335o\u0335r\u0335 \u0335w\u0335o\u0335r\u0335k\u0335?\u0335 \u0335D\u0335o\u0335e\u0335s\u0335 \u0335i\u0335t\u0335 \u0335k\u0335i\u0335c\u0335k\u0335 \u0335i\u0335n\u0335 \u0335i\u0335n\u0335t\u0335e\u0335r\u0335m\u0335i\u0335t\u0335t\u0335e\u0335n\u0335t\u0335l\u0335y\u0335?\u0335 \u0335C\u0335o\u0335u\u0335l\u0335d\u0335 \u0335t\u0335h\u0335e\u0335 \u0335g\u0335a\u0335r\u0335b\u0335a\u0335g\u0335e\u0335 \u0335c\u0335o\u0335l\u0335l\u0335e\u0335c\u0335t\u0335o\u0335r\u0335 \u0335b\u0335e\u0335 \u0335m\u0335u\u0335d\u0335d\u0335l\u0335i\u0335n\u0335g\u0335 \u0335y\u0335o\u0335u\u0335r\u0335 \u0335m\u0335e\u0335a\u0335s\u0335u\u0335r\u0335e\u0335m\u0335e\u0335n\u0335t\u0335s\u0335,\u0335 \u0335a\u0335n\u0335d\u0335 \u0335i\u0335f\u0335 \u0335s\u0335o\u0335,\u0335 \u0335c\u0335a\u0335n\u0335 \u0335i\u0335t\u0335 \u0335b\u0335e\u0335 \u0335d\u0335i\u0335s\u0335a\u0335b\u0335l\u0335e\u0335d\u0335?\u0335\nEdit: Sorry, I just reread your comment and saw that you already addressed garbage collection.",
+                                  "time": 1700012745,
+                                  "kids": [
+                                    {
+                                      "id": 38282843,
+                                      "by": "senderista",
+                                      "text": "Despite my disclaimer about GC (and my effort to use JMH properly), I find it difficult to trust microbenchmarks on the JVM. I don&#x27;t know when I&#x27;ll have time for this, but &quot;someday&quot; I&#x27;d like to port this whole codebase to Rust&#x2F;Criterion (which should be straightforward because the algorithms&#x2F;data structures are &quot;trivial&quot;), and see if the more surprising artifacts persist. I do find the overall differentiation between RH and BLP surprising; I expected them to have pretty similar performance profiles.<p>In any case, I would definitely appreciate someone else rerunning the benchmarks on a different platform&#x2F;JVM!",
+                                      "time": 1700084063,
+                                      "kids": []
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": 38227802,
+          "by": "adgjlsfhk1",
+          "text": "imo a pretty good approach is tombstones where you delete trailing tombstones. that way the tombstones can&#x27;t overly clog the dictionary but never have to move live objects",
+          "time": 1699679311,
+          "kids": [
+            {
+              "id": 38231613,
+              "by": "senderista",
+              "text": "Here is a simple heuristic for avoiding most tombstones when the load factor isn&#x27;t too high:<p><a href=\"https:&#x2F;&#x2F;arxiv.org&#x2F;pdf&#x2F;1808.04602.pdf\" rel=\"nofollow noreferrer\">https:&#x2F;&#x2F;arxiv.org&#x2F;pdf&#x2F;1808.04602.pdf</a>",
+              "time": 1699719547,
+              "kids": []
+            }
+          ]
+        },
+        {
+          "id": 38227813,
+          "by": "celeritascelery",
+          "text": "This is a really cool approach! But if it so obvious, why doesn&#x27;t every hashmap use it? It seems like there are some trade-offs here that I must be missing.",
+          "time": 1699679429,
+          "kids": [
+            {
+              "id": 38227955,
+              "by": "Leszek",
+              "text": "If you do any kind of probing other than linear probing (e.g. quadratic probing) this approach doesn&#x27;t work anymore, because your collisions are no longer densely grouped together.",
+              "time": 1699682052,
+              "kids": []
+            },
+            {
+              "id": 38231662,
+              "by": "senderista",
+              "text": "The main tradeoff is concurrency: it&#x27;s difficult to safely read a hash table while its entries are being concurrently relocated. Another tradeoff is (probably) higher average latency (but worst-case latency is much better since there&#x27;s no global rehashing required).",
+              "time": 1699719921,
+              "kids": []
+            }
+          ]
+        },
+        {
+          "id": 38236386,
+          "by": "teo_zero",
+          "text": "May I ask why you decided to store the hash instead of the element?",
+          "time": 1699752572,
+          "kids": [
+            {
+              "id": 38256023,
+              "by": "senderista",
+              "text": "Two reasons:<p>1. I never need to recalculate the hash in order to find the preferred bucket.<p>2. The BLP invariant is that entries are strictly ordered by hash code (Robin Hood can actually be reformulated in terms of the same invariant, but it&#x27;s less efficient because entries with the same preferred bucket can only reside at or after that bucket rather than before, at, or after it). This allows you to view a hash table as just a sorted array with gaps, and hash table lookup as interpolation search.",
+              "time": 1699913123,
+              "kids": [
+                {
+                  "id": 38300245,
+                  "by": "teo_zero",
+                  "text": "I assume you do a lot of deletions for 1. to be significant. On the other hand, you restrict yourself to a specific class of hashes: reversible and bijective (and never producing a zero for a valid input, although I think this is just how this particular table is built and can be easily changed). This a severe limitation to ever store any data other than integers, e.g. strings.<p>I&#x27;m not criticizing. I&#x27;ve never implemented a hash table myself and want to learn. I&#x27;m just trying to understand what&#x27;s the trade off you considered that I don&#x27;t see.",
+                  "time": 1700202572,
+                  "kids": [
+                    {
+                      "id": 38307270,
+                      "by": "senderista",
+                      "text": "Using a reversible hash function to store encoded keys is certainly a domain-specific optimization, but integer keys are so common that I don&#x27;t understand why I don&#x27;t see this optimization more often. For non-integer keys, you can just store truncated hash codes to eliminate hash function calls in most cases (note that the hash value is needed both to calculate the preferred bucket and to determine the order of entries in that bucket). The smaller the table, the smaller the truncated hash codes can be. When you resize the table, you can increase the truncated hash code size if necessary (one bit for each doubling, which you can amortize by adding a byte every 8 doublings). This of course requires rehashing all keys, but conventional hash tables already rehash all keys on resizing.",
+                      "time": 1700243791,
+                      "kids": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 38227559,
+      "by": "lll-o-lll",
+      "text": "Hash maps are such a fundamentally important data structure that it comes as a surprise that the Zig implementation is so broken. Good to see it\u2019s getting fixed, but surprising that this wasn\u2019t detected before.",
+      "time": 1699676005,
+      "kids": [
+        {
+          "id": 38228361,
+          "by": "tialaramex",
+          "text": "My impression from the article is that Zig provides several <i>different</i> hashtables and not all of them are broken in this way.<p>This reminds me of Aria&#x27;s comment in her Rust tutorial <a href=\"https:&#x2F;&#x2F;rust-unofficial.github.io&#x2F;too-many-lists&#x2F;\" rel=\"nofollow noreferrer\">https:&#x2F;&#x2F;rust-unofficial.github.io&#x2F;too-many-lists&#x2F;</a> about failing to kill LinkedList. One philosophy (and the one Rust chose) for a stdlib is that this is only where things should live when they&#x27;re so commonly needed that essentially everybody needs them either directly or to talk about. So, HashTable is needed by so much otherwise unrelated software that qualifies, BloomFilter, while it&#x27;s real useful for some people, not so much. Aria cleaned out Rust&#x27;s set of standard library containers before Rust 1.0, trying to keep only those most people would need. LinkedList isn&#x27;t a good general purpose data structure, but, it was too popular and Aria was not able to remove it.<p>Having multiple hash tables feels like a win (they&#x27;re optimized for different purposes) but may cost too much in terms of the necessary testing to ensure they all hit the quality you want.",
+          "time": 1699688683,
+          "kids": [
+            {
+              "id": 38228843,
+              "by": "otabdeveloper4",
+              "text": "Linked lists are necessary when you have structures that can&#x27;t be moved. Very important in a highly concurrent or lockfree environment.",
+              "time": 1699696067,
+              "kids": [
+                {
+                  "id": 38229138,
+                  "by": "iudqnolq",
+                  "text": "How could you use the <i>Rust standard library&#x27;s</i> linked list for that?",
+                  "time": 1699699312,
+                  "kids": []
+                },
+                {
+                  "id": 38231182,
+                  "by": "KerrAvon",
+                  "text": "A deque will usually work just as well in that environment and it will always have better general performance characteristics. There are very few legitimate uses of linked lists.",
+                  "time": 1699716762,
+                  "kids": [
+                    {
+                      "id": 38231913,
+                      "by": null,
+                      "text": null,
+                      "time": 1699721352,
+                      "kids": []
+                    },
+                    {
+                      "id": 38233000,
+                      "by": "otabdeveloper4",
+                      "text": "A deque is a doubly-linked list under the hood.",
+                      "time": 1699727144,
+                      "kids": [
+                        {
+                          "id": 38236344,
+                          "by": "adgjlsfhk1",
+                          "text": "Array based deques are very common (and usually much faster). Doubly linked lists are absolutely awful for memory locality.",
+                          "time": 1699752151,
+                          "kids": []
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "id": 38229081,
+                  "by": "boxed",
+                  "text": "Can&#x27;t you have a list of pointers instead?",
+                  "time": 1699698751,
+                  "kids": [
+                    {
+                      "id": 38229507,
+                      "by": "xgstation",
+                      "text": "Resizing&#x2F;deleting items in list in most implementations are either not lock free or not threadsafe",
+                      "time": 1699703487,
+                      "kids": [
+                        {
+                          "id": 38230138,
+                          "by": "chmod775",
+                          "text": "Yeah, but what if you just use smaller lists and point to the next&#x2F;previous list?<p>Hold on...",
+                          "time": 1699709453,
+                          "kids": []
+                        },
+                        {
+                          "id": 38248880,
+                          "by": "boxed",
+                          "text": "Linked lists aren&#x27;t either so....?",
+                          "time": 1699872460,
+                          "kids": []
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": 38228826,
+          "by": "AndyKelley",
+          "text": "I personally have two habits that made me not notice:<p>1. I generally prefer ArrayHashMap<p>2. I tend to not delete things from hash maps",
+          "time": 1699695844,
+          "kids": []
+        },
+        {
+          "id": 38230014,
+          "by": "liftm",
+          "text": "It&#x27;s surprisingly common for fledgling programming languages\u2026 <i>cough</i> <a href=\"https:&#x2F;&#x2F;accidentallyquadratic.tumblr.com&#x2F;post&#x2F;153545455987&#x2F;rust-hash-iteration-reinsertion\" rel=\"nofollow noreferrer\">https:&#x2F;&#x2F;accidentallyquadratic.tumblr.com&#x2F;post&#x2F;153545455987&#x2F;r...</a><p>(I know <a href=\"https:&#x2F;&#x2F;news.ycombinator.com&#x2F;item?id=38138223\">https:&#x2F;&#x2F;news.ycombinator.com&#x2F;item?id=38138223</a>, but at least I&#x27;m not the first one this time.)",
+          "time": 1699708229,
+          "kids": []
+        },
+        {
+          "id": 38228058,
+          "by": "murkt",
+          "text": "Not that many hashmaps see hundreds of millions of entries in their lifetime. Given that Zig isn\u2019t widely used, it\u2019s probable that noone has really stumbled upon this behaviour in a non-benchmark setting.",
+          "time": 1699684135,
+          "kids": [
+            {
+              "id": 38228308,
+              "by": "shemii",
+              "text": "Actually it seems according to the issue that TigerBeetle (one of the bigger zig projects out there) noticed this issue [1]. It&#x27;s also on their issue tracker [2].<p>[1] <a href=\"https:&#x2F;&#x2F;github.com&#x2F;ziglang&#x2F;zig&#x2F;issues&#x2F;17851\">https:&#x2F;&#x2F;github.com&#x2F;ziglang&#x2F;zig&#x2F;issues&#x2F;17851</a><p>[2] <a href=\"https:&#x2F;&#x2F;github.com&#x2F;tigerbeetle&#x2F;tigerbeetle&#x2F;issues&#x2F;1191\">https:&#x2F;&#x2F;github.com&#x2F;tigerbeetle&#x2F;tigerbeetle&#x2F;issues&#x2F;1191</a>",
+              "time": 1699688042,
+              "kids": [
+                {
+                  "id": 38228392,
+                  "by": "brabel",
+                  "text": "When you use a language that&#x27;s in alpha- (maybe beta- now?) stage, this kind of thing should be expected.\nEven with the latest version of Zig, perfectly correct programs can segfault due to miscompilation, so performance issues are not even the biggest worry you should have.",
+                  "time": 1699689148,
+                  "kids": [
+                    {
+                      "id": 38228426,
+                      "by": "shemii",
+                      "text": "One thing I really don&#x27;t unserstand is how bun already reached stability with it&#x27;s 1.0 release (<a href=\"https:&#x2F;&#x2F;bun.sh&#x2F;blog&#x2F;bun-v1.0\" rel=\"nofollow noreferrer\">https:&#x2F;&#x2F;bun.sh&#x2F;blog&#x2F;bun-v1.0</a>) while being written in Zig, which still hasn&#x27;t reached it&#x27;s 1.0 release.",
+                      "time": 1699689809,
+                      "kids": [
+                        {
+                          "id": 38229650,
+                          "by": "brabel",
+                          "text": "If you test your software built on Zig close to 100% then you can be pretty confident you didn&#x27;t run into any of the Zig compiler bugs. Bun has certainly run into them but they can almost always be worked around... if you work around all problems and manage to catch everything then yeah, you can have an application that&#x27;s production worthy while being built on a compiler that&#x27;s not quite there yet.<p>The problem is, of course, you almost certainly didn&#x27;t test anything near 100% and probably not even everything users may do with your software, so it&#x27;s a risky bet.",
+                          "time": 1699704767,
+                          "kids": []
+                        },
+                        {
+                          "id": 38228660,
+                          "by": "kreetx",
+                          "text": "Versioning isn\u2019t an exact science, and people use whatever they see fit, both for technical but also marketing purposes.",
+                          "time": 1699693580,
+                          "kids": []
+                        },
+                        {
+                          "id": 38228463,
+                          "by": "fastball",
+                          "text": "Bun is compiled to a binary, so not sure it matters how stable the underlying language is if Bun itself has a stable API?",
+                          "time": 1699690490,
+                          "kids": [
+                            {
+                              "id": 38229192,
+                              "by": "KolmogorovComp",
+                              "text": "That\u2019s the point OP is making, even if the program is bug-free, given the compiler\u2019s current state there\u2019s a chance the compiled binary has bugs (due to miscompilation).<p>Now that can happen with every compiler but using one in still in alpha significantly increases the risk.",
+                              "time": 1699700177,
+                              "kids": [
+                                {
+                                  "id": 38231070,
+                                  "by": "fastball",
+                                  "text": "Does it help at all that Zig is LLVM-based?",
+                                  "time": 1699716119,
+                                  "kids": [
+                                    {
+                                      "id": 38231546,
+                                      "by": "wredue",
+                                      "text": "Not particularly. And zig is moving away from llvm anyway.",
+                                      "time": 1699719173,
+                                      "kids": []
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "id": 38230037,
+                          "by": "losvedir",
+                          "text": "If we&#x27;re talking SemVer then 1.0 only means a commitment to a public interface. It doesn&#x27;t mean the code has no more bugs and ready for use in a spaceship.<p>Conversely, taking on a dependency prior to its 1.0 just means you&#x27;re on the hook for dealing with API changes as they come up. But as long as the API <i>you</i> expose doesn&#x27;t change, it&#x27;s fine to be on 1.0 yourself.",
+                          "time": 1699708442,
+                          "kids": []
+                        }
+                      ]
+                    },
+                    {
+                      "id": 38229049,
+                      "by": "kprotty",
+                      "text": "Are there any links &#x2F; examples for the miscompilations?",
+                      "time": 1699698507,
+                      "kids": [
+                        {
+                          "id": 38229310,
+                          "by": "KolmogorovComp",
+                          "text": "Zig\u2019s issue tracker list them [0].<p>[0]: <a href=\"https:&#x2F;&#x2F;github.com&#x2F;ziglang&#x2F;zig&#x2F;issues?q=is%3Aopen+is%3Aissue+label%3Amiscompilation\">https:&#x2F;&#x2F;github.com&#x2F;ziglang&#x2F;zig&#x2F;issues?q=is%3Aopen+is%3Aissue...</a>",
+                          "time": 1699701628,
+                          "kids": [
+                            {
+                              "id": 38243604,
+                              "by": "kprotty",
+                              "text": "Thanks, seems like most are from LLVM or packed structs.",
+                              "time": 1699819385,
+                              "kids": []
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": 38230933,
+          "by": "29athrowaway",
+          "text": "Zig is rather new, so it doesn&#x27;t surprise me.",
+          "time": 1699715316,
+          "kids": []
+        }
+      ]
+    },
+    {
+      "id": 38227752,
+      "by": "Dwedit",
+      "text": "So in other words, bug in Zig library causes linear execution time on something that isn&#x27;t supposed to be linear.",
+      "time": 1699678611,
+      "kids": []
+    },
+    {
+      "id": 38228140,
+      "by": "chmod600",
+      "text": "Factor looks cool, but what&#x27;s it really about? Can someone who loves the language explain why?",
+      "time": 1699685692,
+      "kids": [
+        {
+          "id": 38230749,
+          "by": "mrjbq7",
+          "text": "I&#x27;m a bit biased as I&#x27;ve been working on and with Factor for 15 years and I am also the author of the linked article and &quot;Re: Factor&quot; blog.<p>I find Factor to have a compelling sweet spot of concise syntax, dynamic features, and (relatively) high performance. But in particular, I think we&#x27;ve done a good job with a few things:<p>1) Making the language very &quot;clickable&quot;, so you can introspect and dig down into all function and type definitions.<p>2) Provide a lot of batteries-included in the standard library.<p>3) Make it super easy to accept contributions, there&#x27;s a part of the distribution that is &quot;extra&quot; and has low barrier to entry and then we commit to keeping code working and promoting things to the main standard library when they are useful&#x2F;documented&#x2F;tested enough.",
+          "time": 1699714272,
+          "kids": [
+            {
+              "id": 38231445,
+              "by": "broken-kebab",
+              "text": "I always suspected that Factor appeared as an attempt to re-live Forth magic, but at higher level, more applicable outside of embedded domain",
+              "time": 1699718436,
+              "kids": []
+            }
+          ]
+        },
+        {
+          "id": 38228183,
+          "by": "m031",
+          "text": "Found this page on that subject: <a href=\"https:&#x2F;&#x2F;concatenative.org&#x2F;wiki&#x2F;view&#x2F;Factor&#x2F;FAQ&#x2F;Why%3F\" rel=\"nofollow noreferrer\">https:&#x2F;&#x2F;concatenative.org&#x2F;wiki&#x2F;view&#x2F;Factor&#x2F;FAQ&#x2F;Why%3F</a>",
+          "time": 1699686468,
+          "kids": []
+        },
+        {
+          "id": 38229348,
+          "by": "Avshalom",
+          "text": "It&#x27;s as flexible as commonlisp or smalltalk.",
+          "time": 1699701969,
+          "kids": []
+        }
+      ]
+    },
+    {
+      "id": 38231285,
+      "by": "zelphirkalt",
+      "text": "Not a good showcase of Factor code. All variable names 1 letter, seemingly simply chosen subsequent letters in the alphabet, instead of any names, that would indicate what the code does.",
+      "time": 1699717290,
+      "kids": [
+        {
+          "id": 38231336,
+          "by": "mrjbq7",
+          "text": "I agree, I&#x27;ve written much better Factor code. This was mainly to get a matching test case working simply...",
+          "time": 1699717679,
+          "kids": []
+        }
+      ]
+    },
+    {
+      "id": 38229725,
+      "by": null,
+      "text": null,
+      "time": 1699705482,
+      "kids": []
+    },
+    {
+      "id": 38224052,
+      "by": "kencausey",
+      "text": "Title is a bit clickbait.  This is regarding Hashmaps specifically.  Read or at least scan through it where the author will submit a fix for the Zig implementation resulting in Zig&#x27;s Hashmap being 50% faster than the Factor implementation.",
+      "time": 1699648003,
+      "kids": [
+        {
+          "id": 38226071,
+          "by": "dang",
+          "text": "I&#x27;ve edited the title to make that clearer. Thanks!",
+          "time": 1699659909,
+          "kids": [
+            {
+              "id": 38227904,
+              "by": "sirmike_",
+              "text": "[flagged]",
+              "time": 1699680766,
+              "kids": [
+                {
+                  "id": 38228031,
+                  "by": "froh",
+                  "text": "[flagged]",
+                  "time": 1699683659,
+                  "kids": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 38227706,
+      "by": "benatkin",
+      "text": "Why hashmaps? Python has named tuples.<p>Oh - this puts a lot of keys into one hashmap, not a ton of objects with the same keys. :)",
+      "time": 1699677929,
+      "kids": [
+        {
+          "id": 38227806,
+          "by": "murkt",
+          "text": "Python also has dicts.",
+          "time": 1699679334,
+          "kids": [
+            {
+              "id": 38227869,
+              "by": "benatkin",
+              "text": "Of course.<p>I was just saying that a lot of the time hashmaps don&#x27;t get very many entries.<p>There is serialization and deserialization where Cap&#x27;n Proto, Flatbuffers, and Protocol Buffers have a savings over JSON by not repeating key names of a list of maps.",
+              "time": 1699680157,
+              "kids": [
+                {
+                  "id": 38228052,
+                  "by": "murkt",
+                  "text": "I fail to see how is this relevant to the article. HashMap&#x2F;dict can as well store a mapping from an integer to an integer. Or from a token to an integer, or whatever, and it has nothing to do with serialization, JSON inefficiency or lists of maps.",
+                  "time": 1699684019,
+                  "kids": []
+                },
+                {
+                  "id": 38228057,
+                  "by": "asplake",
+                  "text": "Use the structure that best fits the problem. The saving to which you refer applies only to serialisation, not to the use of the structure by an algorithm.",
+                  "time": 1699684115,
+                  "kids": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
