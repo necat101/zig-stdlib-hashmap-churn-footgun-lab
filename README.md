@@ -70,6 +70,12 @@ Quick start (Windows Command Prompt):
 run.bat
 ```
 
+Quick start (Windows PowerShell):
+
+```powershell
+.\run.ps1
+```
+
 Or step by step:
 
 ```bash
@@ -95,6 +101,7 @@ Tested with: Zig 0.17.0-dev.1267+300116b02
 
 - `run.sh` – one-command local footgun runner (Linux/macOS, `./run.sh`)
 - `run.bat` – one-command local footgun runner (Windows Command Prompt, `run.bat`)
+- `run.ps1` – one-command local footgun runner (Windows PowerShell, `.\run.ps1`)
 - `generate_cases.py` – deterministic fake hashmap operation cases
 - `run_lab.py` – finds Zig, generates `hashmap_churn_lab.zig`, compiles/runs, validates, writes RESULTS.md
 - `hashmap_churn_lab.zig` – Zig stdlib harness (generated, deterministic, committed)
