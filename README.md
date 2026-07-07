@@ -58,6 +58,14 @@ Also intentionally NOT: apt/sudo installs, Docker, external Zig packages, C libr
 
 ## Running the lab
 
+Quick start:
+
+```bash
+./run.sh
+```
+
+Or step by step:
+
 ```bash
 python3 -m py_compile generate_cases.py run_lab.py
 python3 generate_cases.py
@@ -79,6 +87,7 @@ Tested with: Zig 0.17.0-dev.1267+300116b02
 
 ## Repo layout
 
+- `run.sh` – one-command local footgun runner (`./run.sh`)
 - `generate_cases.py` – deterministic fake hashmap operation cases
 - `run_lab.py` – finds Zig, generates `hashmap_churn_lab.zig`, compiles/runs, validates, writes RESULTS.md
 - `hashmap_churn_lab.zig` – Zig stdlib harness (generated, deterministic, committed)
