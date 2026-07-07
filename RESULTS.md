@@ -21,9 +21,33 @@ Platform: Linux-6.17.0-1009-aws-x86_64-with-glibc2.39
 
 Pass count (success matched): 373
 
-Fail count: 107
+Fail count (actual ≠ expected): 107
 
 Naive expected-fail count: 15
+
+## Result count reconciliation
+
+Total rows: 850 (50 cases × 17 methods)
+
+| Category | Count |
+|---|---|
+| Pass (actual = expected = success) | 373 |
+| Fail (actual ≠ expected) | 107 |
+| Skip / not_tested / context_only (actual = expected ≠ success) | 370 |
+| **Total** | **850** |
+
+Breakdown of expected outcomes across all 850 rows:
+- expected_success = success: 425 rows
+- expected_success = context_only: 238 rows
+- expected_success = not_tested: 187 rows
+
+Breakdown of actual outcomes:
+- actual_success = success: 423 rows
+- actual_success = context_only: 209 rows
+- actual_success = not_tested: 203 rows
+- actual_success = fail: 15 rows (all from `naive_hashmap_policy_marker`, expected)
+
+Matched (actual = expected): 743 / 850 rows
 
 
 ## Skip matrix
