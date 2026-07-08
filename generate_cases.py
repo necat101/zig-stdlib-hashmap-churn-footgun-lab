@@ -1,164 +1,288 @@
 #!/usr/bin/env python3
-"""Generate deterministic synthetic hashmap churn cases."""
-import json, random
-random.seed(42)
+"""
+zig-stdlib-hashmap-churn-footgun-lab – generate_cases.py
 
-cases = [
-    # (id, category, operation)
-    ("case_001", "auto_hashmap_insert_lookup_marker", "insert_lookup"),
-    ("case_002", "auto_hashmap_remove_existing_marker", "remove_existing"),
-    ("case_003", "auto_hashmap_remove_missing_marker", "remove_missing"),
-    ("case_004", "auto_hashmap_fetch_remove_marker", "fetch_remove"),
-    ("case_005", "get_or_put_existing_marker", "get_or_put_existing"),
-    ("case_006", "get_or_put_new_initialize_marker", "get_or_put_new"),
-    ("case_007", "contains_after_remove_marker", "contains_after_remove"),
-    ("case_008", "count_after_remove_marker", "count_after_remove"),
-    ("case_009", "count_after_reinsert_marker", "count_after_reinsert"),
-    ("case_010", "clear_retaining_capacity_marker", "clear_retaining"),
-    ("case_011", "clear_and_free_marker", "clear_free"),
-    ("case_012", "repeated_remove_reinsert_churn_marker", "churn"),
-    ("case_013", "tombstone_context_marker", "tombstone_context"),
-    ("case_014", "load_factor_context_marker", "load_factor_context"),
-    ("case_015", "capacity_growth_context_marker", "capacity_growth"),
-    ("case_016", "small_map_no_churn_marker", "small_no_churn"),
-    ("case_017", "insert_only_workload_marker", "insert_only"),
-    ("case_018", "delete_heavy_workload_marker", "delete_heavy"),
-    ("case_019", "lookup_after_churn_marker", "lookup_after_churn"),
-    ("case_020", "replacement_value_update_marker", "replace_value"),
-    ("case_021", "duplicate_put_overwrite_marker", "duplicate_put"),
-    ("case_022", "array_hash_map_context_marker", "array_hash_map"),
-    ("case_023", "array_hash_map_iteration_order_context_marker", "array_iteration_order"),
-    ("case_024", "string_hash_map_stable_owned_key_marker", "string_owned_key"),
-    ("case_025", "string_hash_map_ephemeral_key_context_not_run_marker", "string_ephemeral_not_run"),
-    ("case_026", "allocator_deinit_marker", "allocator_deinit"),
-    ("case_027", "allocator_leak_not_tested_marker", "allocator_leak_not_tested"),
-    ("case_028", "iterator_mutation_not_run_marker", "iterator_mutation_not_run"),
-    ("case_029", "concurrent_reader_not_tested_marker", "concurrent_not_tested"),
-    ("case_030", "expensive_hash_context_marker", "expensive_hash_context"),
-    ("case_031", "stored_hash_context_not_tested_marker", "stored_hash_not_tested"),
-    ("case_032", "backshift_deletion_context_not_implemented_marker", "backshift_not_impl"),
-    ("case_033", "rehash_patch_context_not_implemented_marker", "rehash_not_impl"),
-    ("case_034", "tigerbeetle_context_marker", "tigerbeetle_context"),
-    ("case_035", "pre_1_0_stdlib_maturity_marker", "pre_1_0_marker"),
-    ("case_036", "compiler_miscompile_not_tested_marker", "miscompile_not_tested"),
-    ("case_037", "factor_benchmark_not_run_marker", "factor_not_run"),
-    ("case_038", "huge_benchmark_not_run_marker", "huge_benchmark_not_run"),
-    ("case_039", "no_external_dataset_marker", "no_external_dataset"),
-    ("case_040", "no_network_input_marker", "no_network"),
-    ("case_041", "no_package_manager_marker", "no_package_manager"),
-    ("case_042", "production_performance_not_tested_marker", "prod_perf_not_tested"),
-    ("case_043", "version_compatibility_marker", "version_compat"),
-    ("case_044", "naive_policy_expected_fail_marker", "naive_expected_fail"),
-    ("case_045", "safety_caveat_marker", "safety_caveat"),
-]
+Deterministic synthetic hashmap operation cases.
+"""
+import json, pathlib
 
-# pad to 50 cases
-extra_cats = [
-    "auto_hashmap_insert_lookup_marker",
-    "count_after_remove_marker",
-    "insert_only_workload_marker",
-    "lookup_after_churn_marker",
-    "safety_caveat_marker",
-]
-for i in range(5):
-    cid = f"case_{46+i:03d}"
-    cat = extra_cats[i]
-    cases.append((cid, cat, "insert_lookup"))
+cases = []
 
-out = []
-for idx, (case_id, category, op) in enumerate(cases, 1):
-    fake_map_name = f"example_map_case_{idx}"
-    synthetic_key_label = f"fake_key_{idx}"
-    synthetic_value_label = f"demo_hash_key_{idx}"
-    operation_sequence_label = op
-    expected_map_type_label = "AutoHashMap" if "array" not in category and "string" not in category else ("ArrayHashMap" if "array" in category else "StringHashMap")
-    
-    # Determine expected outcomes
-    expected_success = "success"
-    expected_count_before = 0
-    expected_count_after = 1
-    expected_lookup_result = "found"
-    expected_removal_result = "n/a"
-    expected_fetch_remove_result = "n/a"
-    expected_get_or_put_behavior = "n/a"
-    expected_capacity_relation = "n/a"
-    expected_churn_context = "none" if "churn" not in category and "tombstone" not in category else "churn_toy"
-    expected_string_key_ownership_caveat = "stable_owned" if "string" in category else "n/a"
-    expected_allocator_deinit_behavior = "deinit_called"
-    expected_iterator_concurrency_caveat = "not_run" if any(x in category for x in ["iterator", "concurrent"]) else "n/a"
-    expected_version_compatibility_truth = "local_only"
-    expected_production_performance_truth = "not_tested"
-    skip_reason = ""
-    not_tested = False
-    context_only = False
-
-    if "remove_existing" in category:
-        expected_removal_result = "removed_true"
-        expected_count_after = 0
-    if "remove_missing" in category:
-        expected_removal_result = "removed_false"
-        expected_count_after = 0
-    if "fetch_remove" in category:
-        expected_fetch_remove_result = "kv_returned"
-    if "get_or_put_existing" in category:
-        expected_get_or_put_behavior = "found_existing_true"
-    if "get_or_put_new" in category:
-        expected_get_or_put_behavior = "found_existing_false_init_required"
-    if "contains_after_remove" in category:
-        expected_lookup_result = "not_found"
-    if "count_after_remove" in category:
-        expected_count_after = 0
-    if "count_after_reinsert" in category:
-        expected_count_after = 1
-    if "clear_retaining" in category:
-        expected_capacity_relation = "capacity_retained"
-        expected_count_after = 0
-    if "clear_and_free" in category:
-        expected_capacity_relation = "capacity_freed"
-        expected_count_after = 0
-    if "duplicate_put" in category or "replace_value" in category:
-        expected_count_after = 1
-        expected_lookup_result = "found_updated"
-    if any(x in category for x in ["not_tested", "not_run", "not_implemented", "context_marker", "no_external", "no_network", "no_package", "production_performance", "factor_benchmark", "huge_benchmark", "compiler_miscompile", "tigerbeetle", "pre_1_0", "expensive_hash", "stored_hash", "backshift", "rehash", "allocator_leak", "concurrent_reader", "iterator_mutation", "string_hash_map_ephemeral", "array_hash_map_iteration_order", "safety_caveat", "naive_policy"]):
-        expected_success = "not_tested" if "not_tested" in category or "not_run" in category or any(s in category for s in ["production_performance", "factor_benchmark", "huge_benchmark", "compiler_miscompile", "stored_hash", "backshift", "rehash", "allocator_leak", "concurrent"]) else "context_only"
-        not_tested = "not_tested" in expected_success
-        context_only = "context" in expected_success
-        skip_reason = "intentionally_not_run_toy_lab_scope"
-        expected_lookup_result = "n/a"
-        expected_count_after = 0
-
-    if "ephemeral" in category:
-        expected_string_key_ownership_caveat = "ephemeral_unsafe_context_only"
-    if "iterator" in category or "concurrent" in category:
-        expected_iterator_concurrency_caveat = "intentionally_not_run"
-
-    out.append({
+def add(case_id, category, **kw):
+    base = {
         "case_id": case_id,
         "category": category,
-        "fake_map_name": fake_map_name,
-        "synthetic_key_label": synthetic_key_label,
-        "synthetic_value_label": synthetic_value_label,
-        "operation_sequence_label": operation_sequence_label,
-        "expected_map_type_label": expected_map_type_label,
-        "expected_success": expected_success,
-        "expected_count_before": expected_count_before,
-        "expected_count_after": expected_count_after,
-        "expected_lookup_result": expected_lookup_result,
-        "expected_removal_result": expected_removal_result,
-        "expected_fetch_remove_result": expected_fetch_remove_result,
-        "expected_get_or_put_behavior": expected_get_or_put_behavior,
-        "expected_capacity_relation": expected_capacity_relation,
-        "expected_churn_context": expected_churn_context,
-        "expected_string_key_ownership_caveat": expected_string_key_ownership_caveat,
-        "expected_allocator_deinit_behavior": expected_allocator_deinit_behavior,
-        "expected_iterator_concurrency_caveat": expected_iterator_concurrency_caveat,
-        "expected_version_compatibility_truth": expected_version_compatibility_truth,
-        "expected_production_performance_truth": expected_production_performance_truth,
-        "expected_reason_for_failure_or_skip": skip_reason,
-        "naive_expected_fail": category == "naive_policy_expected_fail_marker",
-        "synthetic": True,
-    })
+        "fake_map_name": kw.get("fake_map_name", "example_map_case"),
+        "synthetic_key_label": kw.get("synthetic_key_label", "fake_key"),
+        "synthetic_value_label": kw.get("synthetic_value_label", "demo_hash_key"),
+        "operation_sequence_label": kw.get("operation_sequence_label", "toy_lookup_case"),
+        "expected_map_type_label": kw.get("expected_map_type_label", "std.AutoHashMap"),
+        "expected_success": kw.get("expected_success", "success"),
+        "expected_count_before": kw.get("expected_count_before", 0),
+        "expected_count_after": kw.get("expected_count_after", 1),
+        "expected_lookup_result": kw.get("expected_lookup_result", "found"),
+        "expected_removal_result": kw.get("expected_removal_result", "not_applicable"),
+        "expected_fetchRemove_result": kw.get("expected_fetchRemove_result", "not_applicable"),
+        "expected_getOrPut_behavior": kw.get("expected_getOrPut_behavior", "not_applicable"),
+        "expected_capacity_relation": kw.get("expected_capacity_relation", "not_tested"),
+        "expected_churn_context": kw.get("expected_churn_context", "none"),
+        "expected_timing_context": kw.get("expected_timing_context", "local_only"),
+        "expected_string_key_ownership_caveat": kw.get("expected_string_key_ownership_caveat", "none"),
+        "expected_allocator_deinit_behavior": kw.get("expected_allocator_deinit_behavior", "deinit_required"),
+        "expected_iterator_concurrency_caveat": kw.get("expected_iterator_concurrency_caveat", "not_tested"),
+        "expected_version_compatibility_truth": kw.get("expected_version_compatibility_truth", "local_version_only"),
+        "expected_production_performance_truth": kw.get("expected_production_performance_truth", "not_tested"),
+        "expected_failure_reason": kw.get("expected_failure_reason", ""),
+        "expected_fail_for_naive": kw.get("expected_fail_for_naive", False),
+    }
+    base.update(kw)
+    base["case_id"] = case_id
+    base["category"] = category
+    cases.append(base)
 
-with open("cases.json", "w") as f:
-    json.dump(out, f, indent=2)
-print(f"Wrote {len(out)} cases to cases.json")
+# Core AutoHashMap cases
+add("auto_hashmap_insert_lookup_marker", "hashmap_basic",
+    fake_map_name="example_map_case",
+    synthetic_key_label="fake_key",
+    operation_sequence_label="toy_lookup_case",
+    expected_map_type_label="std.AutoHashMap",
+    expected_count_before=0, expected_count_after=1,
+    expected_lookup_result="found")
+
+add("auto_hashmap_remove_existing_marker", "remove",
+    fake_map_name="sample_remove_case",
+    synthetic_key_label="demo_hash_key",
+    operation_sequence_label="sample_remove_case",
+    expected_map_type_label="std.AutoHashMap",
+    expected_count_before=1, expected_count_after=0,
+    expected_removal_result="removed",
+    expected_lookup_result="not_found")
+
+add("auto_hashmap_remove_missing_marker", "remove",
+    fake_map_name="sample_remove_case",
+    synthetic_key_label="fake_key",
+    expected_removal_result="not_found",
+    expected_lookup_result="not_found",
+    expected_count_before=0, expected_count_after=0)
+
+add("auto_hashmap_fetch_remove_marker", "remove",
+    fake_map_name="sample_remove_case",
+    synthetic_key_label="demo_hash_key",
+    operation_sequence_label="fetch_remove_case",
+    expected_map_type_label="std.AutoHashMap",
+    expected_fetchRemove_result="found_and_removed",
+    expected_count_before=1, expected_count_after=0)
+
+add("get_or_put_existing_marker", "get_or_put",
+    fake_map_name="example_map_case",
+    synthetic_key_label="fake_key",
+    operation_sequence_label="get_or_put_case",
+    expected_getOrPut_behavior="found_existing",
+    expected_count_before=1, expected_count_after=1)
+
+add("get_or_put_new_initialize_marker", "get_or_put",
+    fake_map_name="example_map_case",
+    synthetic_key_label="demo_hash_key",
+    operation_sequence_label="get_or_put_case",
+    expected_getOrPut_behavior="inserted_new_must_initialize",
+    expected_count_before=0, expected_count_after=1,
+    expected_fail_for_naive=True,
+    expected_failure_reason="naive getOrPut assumes overwrite safe without init check")
+
+add("contains_after_remove_marker", "remove",
+    fake_map_name="example_map_case",
+    expected_lookup_result="not_found",
+    expected_removal_result="removed")
+
+add("count_after_remove_marker", "remove",
+    expected_count_before=3, expected_count_after=2,
+    expected_removal_result="removed")
+
+add("count_after_reinsert_marker", "churn",
+    fake_map_name="synthetic_churn_case",
+    operation_sequence_label="synthetic_churn_case",
+    expected_count_before=1, expected_count_after=1,
+    expected_churn_context="remove_reinsert")
+
+# clear / capacity
+add("clear_retaining_capacity_marker", "capacity",
+    fake_map_name="synthetic_capacity_case",
+    operation_sequence_label="clear_retaining_case",
+    expected_capacity_relation="capacity_retained",
+    expected_count_before=5, expected_count_after=0,
+    expected_fail_for_naive=True,
+    expected_failure_reason="naive assumes clearRetainingCapacity == clearAndFree")
+
+add("clear_and_free_marker", "capacity",
+    fake_map_name="synthetic_capacity_case",
+    operation_sequence_label="clear_free_case",
+    expected_capacity_relation="capacity_freed",
+    expected_count_before=5, expected_count_after=0)
+
+# churn / tombstone context
+add("repeated_remove_reinsert_churn_marker", "churn",
+    fake_map_name="synthetic_churn_case",
+    synthetic_key_label="toy_tombstone_context",
+    operation_sequence_label="synthetic_churn_case",
+    expected_churn_context="repeated_delete_heavy",
+    expected_timing_context="local_only")
+
+add("tombstone_context_marker", "churn",
+    fake_map_name="toy_tombstone_context",
+    synthetic_key_label="toy_tombstone_context",
+    operation_sequence_label="tombstone_context",
+    expected_churn_context="tombstone_linear_probing",
+    expected_production_performance_truth="not_tested")
+
+add("load_factor_context_marker", "churn",
+    fake_map_name="hashmap_policy_case",
+    operation_sequence_label="load_factor_case",
+    expected_churn_context="load_factor_affects_probing")
+
+add("capacity_growth_context_marker", "capacity",
+    fake_map_name="synthetic_capacity_case",
+    expected_capacity_relation="capacity_grows",
+    expected_count_before=0, expected_count_after=10)
+
+add("small_map_no_churn_marker", "hashmap_basic",
+    expected_count_before=0, expected_count_after=2)
+
+add("insert_only_workload_marker", "hashmap_basic",
+    operation_sequence_label="insert_only_case",
+    expected_churn_context="none",
+    expected_count_before=0, expected_count_after=5)
+
+add("delete_heavy_workload_marker", "churn",
+    fake_map_name="synthetic_churn_case",
+    operation_sequence_label="delete_heavy_case",
+    expected_churn_context="delete_heavy",
+    expected_fail_for_naive=True,
+    expected_failure_reason="naive assumes insert-only generalizes to delete-heavy")
+
+add("lookup_after_churn_marker", "churn",
+    fake_map_name="synthetic_churn_case",
+    expected_lookup_result="found",
+    expected_churn_context="lookup_after_delete_cycle")
+
+add("replacement_value_update_marker", "hashmap_basic",
+    operation_sequence_label="overwrite_case",
+    expected_count_before=1, expected_count_after=1,
+    expected_lookup_result="found")
+
+add("duplicate_put_overwrite_marker", "hashmap_basic",
+    operation_sequence_label="duplicate_put_case",
+    expected_count_before=1, expected_count_after=1)
+
+# ArrayHashMap
+add("array_hash_map_context_marker", "array_hashmap",
+    fake_map_name="example_map_case",
+    expected_map_type_label="std.ArrayHashMap",
+    expected_count_before=0, expected_count_after=3)
+
+add("array_hash_map_iteration_order_context_marker", "array_hashmap",
+    expected_map_type_label="std.ArrayHashMap",
+    expected_iterator_concurrency_caveat="iteration_order_stable_for_ArrayHashMap_only",
+    expected_fail_for_naive=True,
+    expected_failure_reason="naive assumes iteration order stable across map types")
+
+# StringHashMap
+add("string_hash_map_stable_owned_key_marker", "string_keys",
+    fake_map_name="demo_string_key_case",
+    synthetic_key_label="demo_string_key_case",
+    expected_map_type_label="std.StringHashMap",
+    expected_string_key_ownership_caveat="stable_owned_storage_required")
+
+add("string_hash_map_ephemeral_key_context_not_run_marker", "string_keys",
+    expected_map_type_label="std.StringHashMap",
+    expected_string_key_ownership_caveat="ephemeral_bytes_unsafe",
+    expected_success="not_tested",
+    expected_fail_for_naive=True,
+    expected_failure_reason="naive assumes ephemeral string bytes always safe")
+
+# allocator
+add("allocator_deinit_marker", "allocator",
+    expected_allocator_deinit_behavior="deinit_required",
+    expected_count_before=2, expected_count_after=2)
+
+add("allocator_leak_not_tested_marker", "allocator",
+    expected_allocator_deinit_behavior="not_tested",
+    expected_success="not_tested")
+
+# iterator / concurrency – not run
+add("iterator_mutation_not_run_marker", "iterator",
+    expected_iterator_concurrency_caveat="mutation_during_iteration_not_run",
+    expected_success="not_tested")
+
+add("concurrent_reader_not_tested_marker", "concurrency",
+    expected_iterator_concurrency_caveat="concurrent_read_relocate_not_tested",
+    expected_success="not_tested")
+
+# hash / deletion algorithm context
+add("expensive_hash_context_marker", "hash_context",
+    expected_churn_context="expensive_hash_function",
+    expected_success="context_only")
+
+add("stored_hash_context_not_tested_marker", "hash_context",
+    expected_success="not_tested",
+    expected_churn_context="stored_hash_code_design")
+
+add("backshift_deletion_context_not_implemented_marker", "hash_context",
+    expected_success="context_only",
+    expected_churn_context="backshift_deletion",
+    expected_production_performance_truth="not_tested")
+
+add("rehash_patch_context_not_implemented_marker", "hash_context",
+    expected_success="context_only",
+    expected_churn_context="rehash_on_delete")
+
+# HN thread specific context markers
+add("tigerbeetle_context_marker", "hn_context",
+    expected_success="context_only",
+    expected_production_performance_truth="not_tested",
+    expected_failure_reason="TigerBeetle noticed Zig HashMap churn – context only")
+
+add("pre_1_0_stdlib_maturity_marker", "hn_context",
+    expected_success="context_only",
+    expected_version_compatibility_truth="pre_1_0",
+    expected_production_performance_truth="not_tested")
+
+add("compiler_miscompile_not_tested_marker", "hn_context",
+    expected_success="not_tested",
+    expected_production_performance_truth="not_tested")
+
+add("factor_benchmark_not_run_marker", "hn_context",
+    expected_success="not_run",
+    expected_production_performance_truth="not_tested",
+    expected_failure_reason="Factor benchmark not run – toy lab only")
+
+add("huge_benchmark_not_run_marker", "hn_context",
+    expected_success="not_run",
+    expected_production_performance_truth="not_tested",
+    expected_failure_reason="2M entry / 250M action benchmark not reproduced")
+
+# safety / scope markers
+for cid, cat, reason in [
+("no_external_dataset_marker", "safety", "synthetic keys only"),
+("no_network_input_marker", "safety", "no network"),
+("no_package_manager_marker", "safety", "no external packages"),
+("production_performance_not_tested_marker", "safety", "toy lab only"),
+("version_compatibility_marker", "safety", "local_version_only"),
+("naive_policy_expected_fail_marker", "safety", "naive insert-only assumption"),
+("safety_caveat_marker", "safety", "toy lab – not production benchmark"),
+]:
+    add(cid, cat,
+        expected_success="context_only" if "not_tested" not in cid else "not_tested",
+        expected_production_performance_truth="not_tested",
+        expected_failure_reason=reason,
+        expected_fail_for_naive=("naive" in cid))
+
+# Fill up to ~45 cases – add a few more basic variations
+for i in range(1,6):
+    add(f"auto_hashmap_basic_variant_{i}_marker", "hashmap_basic",
+        synthetic_key_label=f"fake_key_{i}",
+        expected_count_before=i-1,
+        expected_count_after=i)
+
+path = pathlib.Path(__file__).parent / "cases.json"
+path.write_text(json.dumps(cases, indent=2))
+print(f"Wrote {len(cases)} cases to {path}")

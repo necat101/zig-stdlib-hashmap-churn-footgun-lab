@@ -1,11 +1,9 @@
 __pycache__/
 *.pyc
-*.pyo
-/tmp_output/
-/output/
-zig-cache/
+.zig-cache/
 zig-out/
+*.o
 hashmap_churn_lab
 hashmap_churn_lab.exe
-*.o
+*.tmp
 .DS_Store

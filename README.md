@@ -1,82 +1,69 @@
 # zig-stdlib-hashmap-churn-footgun-lab
 
-Tiny local correctness/safety lab about Zig stdlib hashmap churn footguns, inspired by HN thread 38224033.
+A tiny, reproducible, local correctness and safety lab about Zig stdlib hashmap churn footguns – turning a Hacker News debate into observable behavior, not a production benchmark.
 
-## Hacker News thread access
+**HN thread:** https://news.ycombinator.com/item?id=38224033  
+**Linked article:** https://re.factorcode.org/2023/11/factor-is-faster-than-zig.html  
+**Zig docs:** https://ziglang.org/documentation/master/
 
-**The Hacker News tool was used to read the linked HN thread before writing this README.**  
-Thread: https://news.ycombinator.com/item?id=38224033 ("Hashmaps in Factor are faster than in Zig")  
-Accessed via: `openclaw/dist/extensions/hackernews/skills/hackernews/hackernews get-item --id 38224033`  
-Evidence artifacts committed: `hn_thread_evidence.md`, `hn_nodes_sanitized.json`, `hn_comments_sanitized.txt`
+> **Hacker News thread access:** The HN thread at https://news.ycombinator.com/item?id=38224033 was read via the bundled Hacker News CLI (`openclaw skills hackernews`) before writing this README. Sentiments below reflect the actual discussion, not just the article title. Evidence artifacts: `hn_thread_evidence.md`, `hn_nodes_sanitized.json`, `hn_comments_sanitized.txt`.
 
-The README sentiment summary below reflects the actual HN discussion themes, not just the article title.
+## Hacker News thread sentiments
 
-## What HN users were actually debating
+Commenters debated a Factor article reporting that Zig `std.HashMap` got slower over time under a repeated insert/delete workload – classic deletion churn / tombstone accumulation in linear probing.
 
-The linked article found Zig `std.HashMap` slowing down over time under a repeated insert/remove churn workload – attributed to tombstone accumulation in its linear-probing table. The HN thread broadened considerably:
+- **Tombstones and repeated deletion:** Top comment: tombstones in linear probing are hard to justify except in concurrent contexts where you can't move entries. Tombstone-free deletion exists and is simple. Others proposed deleting trailing tombstones, and a heuristic for avoiding most tombstones at moderate load factors.
 
-- **Tombstones and repeated deletion:** Commenters discussed why a hashmap can get slower over time with delete-heavy workloads, how tombstones clog probe chains, and why deletion is the hard part of open-addressing.
-- **Back-shift deletion / rehashing:** Debate about tombstone-free deletion (backward-shift / Robin Hood / backward linear probing), moving entries on delete vs leaving tombstones, and rehashing costs.
-- **Expensive hash functions / stored hashes:** Storing hash codes with entries to avoid recomputing expensive hashes, truncated hash codes, reversible integer hashes – memory vs CPU tradeoffs.
-- **Load factor:** Load factor as a key tuning parameter affecting probe length and tombstone density.
-- **Concurrency / moving entries:** Back-shift deletion makes concurrent readers unsafe (entries move). Tombstones avoid moving live objects – a real concurrency tradeoff.
-- **ArrayHashMap:** Andy Kelley noted he personally prefers `ArrayHashMap` and tends not to delete from hash maps – explaining why the churn issue wasn't caught earlier. Commenters noted Zig provides *multiple* hash table types with different tradeoffs, not one universal table.
-- **Surprise at stdlib issue:** Some were surprised a stdlib hashmap could have this cliff. Others pointed to Zig being pre-1.0 / still maturing, and cited similar hashmap edge cases in young languages (Rust quadratic reinsertion).
-- **TigerBeetle:** TigerBeetle (major Zig project) hit this in production – ziglang/zig#17851 / tigerbeetle/tigerbeetle#1191.
-- **Compiler / language stability:** Thread branched into Zig compiler maturity (open miscompilation bugs), pre-1.0 expectations, and Bun shipping 1.0 on pre-1.0 Zig.
-- **"My tiny benchmark saw X" vs global claims:** The OP clarified the article was about a specific repeated insert/delete workload, and after a fix Zig's HashMap was 50% faster than Factor's. Commenters generally treated this as a workload-specific footgun, not proof that all Zig hash maps are universally fast/slow, and not proof about Factor either.
+- **Back-shift deletion / rehashing:** Back-shift deletion requires rehashing every candidate to avoid shifting beyond its home bucket (unlike Robin Hood where probe lengths give this for free). This makes it unsuitable when the hash function is expensive, unless hash codes are stored or load factor is kept low.
+
+- **Expensive hash functions / load factor:** String-key benchmarks at 0.95 load factor – Robin Hood maps spiked 5–6× slower at 0.95 vs 0.5. SIMD maps (Boost, Absl) and a Fastmap design stayed mostly immune.
+
+- **Concurrency / moving entries:** Main tradeoff for back-shift / relocation-on-delete: "it's difficult to safely read a hash table while its entries are being concurrently relocated". Also higher average latency, but much better worst-case (no global rehash).
+
+- **ArrayHashMap came up:** Andy Kelley (Zig creator) commented directly: "I generally prefer ArrayHashMap" and "I tend to not delete things from hash maps" – explaining why the churn issue went unnoticed.
+
+- **Zig has multiple hash-table types:** Commenters noted Zig provides several different hash tables, not all affected the same way. Stdlib container-design tradeoffs were discussed (Rust LinkedList analogy).
+
+- **Surprise at stdlib performance issue:** "Hash maps are such a fundamentally important data structure that it comes as a surprise that the Zig implementation is so broken. Good to see it's getting fixed, but surprising that this wasn't detected before."
+
+- **Pre-1.0 / maturity expectations:** "When you use a language that's in alpha- (maybe beta- now?) stage, this kind of thing should be expected. Even with the latest version of Zig, perfectly correct programs can segfault due to miscompilation, so performance issues are not even the biggest worry you should have."
+
+- **TigerBeetle came up:** TigerBeetle (one of the bigger Zig projects) noticed this issue – ziglang/zig#17851, tigerbeetle/tigerbeetle#1191.
+
+- **Compiler / language stability:** Discussion about Bun reaching 1.0 while being written in Zig which hasn't reached 1.0. Counterpoint: with close to 100% test coverage you can work around compiler bugs, but "it's a risky bet".
+
+- **"my tiny local churn benchmark saw X" vs global claims:** An extensive sub-thread debated Robin Hood vs BLP (bidirectional linear probing), benchmark methodology, load factor measurement intervals, key types, hash function cost, moving elements cost, cache misses, and JVM microbenchmark trust. Consensus: "benchmarking hash tables is pretty difficult because there's many variables that affect their performance and it's hard to cover all use cases." A local toy run does not prove all Zig hash maps are fast or slow.
+
+See `hn_thread_evidence.md` for a full auditable summary with links.
 
 ## What this lab does
 
-A tiny reproducible toy lab showing hashmap behavior depends on workload:
+- `std.AutoHashMap`, `std.HashMap`, `std.StringHashMap`, `std.ArrayHashMap`
+- `put`, `get`, `remove`, `fetchRemove`, `getOrPut`, `contains`, `count`, `capacity`, `clearRetainingCapacity`, `clearAndFree`
+- allocator-backed map lifetime, stable string-key ownership markers, deletion churn markers, tombstone/load-factor context markers, iterator-mutation not-run markers, local timing markers
+- Deterministic synthetic keys only – `fake_key`, `demo_hash_key`, `synthetic_churn_case`, etc.
+- 50 cases, 17 methods, 850 rows
 
-- Insert-only cases differ from repeated remove/reinsert churn
-- `remove` and `fetchRemove` have different observable semantics
-- `getOrPut` needs correct initialization handling
-- `clearRetainingCapacity` is different from `clearAndFree`
-- String keys need stable owned storage if source bytes may disappear
-- `ArrayHashMap` has different tradeoffs from `AutoHashMap`
-- Local timing observations are separated from broader stdlib design claims
+The point is **not** to reproduce the linked article's 2-million-entry / 250-million-action benchmark, not to benchmark Factor, not to patch Zig stdlib, not to prove one hashmap is universally better, and not to claim a toy run proves Zig production performance.
 
-Covers: `std.AutoHashMap`, `std.HashMap`, `std.StringHashMap`, `std.ArrayHashMap`, `put`, `get`, `remove`, `fetchRemove`, `getOrPut`, `contains`, `count`, `capacity`, `clearRetainingCapacity`, `clearAndFree`, allocator-backed map lifetime, stable string-key ownership markers, deletion churn markers, tombstone/load-factor context markers, iterator-mutation not-run markers, and local timing markers.
+The point is to show: insert-only ≠ delete-heavy churn, `remove` / `fetchRemove` have different semantics, `getOrPut` needs initialization handling, `clearRetainingCapacity` ≠ `clearAndFree`, string keys need stable owned storage, `ArrayHashMap` has different tradeoffs from `AutoHashMap`, and local timing observations ≠ stdlib design claims.
 
-Deterministic synthetic keys only – fake labels like `fake_key`, `demo_hash_key`, `synthetic_churn_case`, etc. No real datasets, no network input.
+## Scope / safety
 
-## What this lab does NOT do
+This is a toy local lab, **not** a production performance benchmark, **not** a patch to Zig stdlib, **not** a Factor benchmark, **not** a compiler stress test, **not** a hash-flooding test, **not** a DoS harness, **not** a fuzzer, **not** a memory-safety exploit.
 
-- NOT a production performance benchmark
-- NOT reproducing the linked article's 2-million-entry / 250-million-action benchmark
-- NOT benchmarking Factor
-- NOT patching Zig stdlib
-- NOT proving one hashmap implementation is universally better
-- NOT claiming a local toy run proves Zig production performance
-- NOT a hash-flooding / DoS harness / fuzzer / memory-safety exploit
-- NOT testing compiler correctness
-- NOT settling hashmap-design debates
+- Deterministic synthetic keys only
+- No real datasets, logs, service keys, production traces
+- No network input, no downloaded corpora
+- No third-party Zig packages, no C libraries
+- No apt / sudo / Docker / package managers
+- No Factor install, no stdlib source checkout
+- No huge maps (no 2M entry / 250M action benchmark)
+- No fuzzers, sanitizers, valgrind, perf, flamegraphs
+- No concurrent readers/writers, no adversarial hash-collision keys
+- No OOM tests, no long-running loops
 
-Also intentionally NOT: apt/sudo installs, Docker, external Zig packages, C libraries, npm/node/cargo/Rust/Go/Java/C++, Factor install, stdlib source checkout, huge maps, fuzzers, sanitizers, valgrind, perf, network calls, adversarial keys, OOM tests, long loops, production latency claims.
-
-## Running the lab
-
-Quick start (Linux/macOS):
-
-```bash
-./run.sh
-```
-
-Quick start (Windows Command Prompt):
-
-```cmd
-run.bat
-```
-
-Quick start (Windows PowerShell):
-
-```powershell
-.\run.ps1
-```
-
-Or step by step:
+## Running
 
 ```bash
 python3 -m py_compile generate_cases.py run_lab.py
@@ -84,63 +71,49 @@ python3 generate_cases.py
 python3 run_lab.py
 ```
 
-Zig harness (if compiler available):
+Zig harness (auto-generated):
+
 ```bash
 zig version
 zig fmt --check hashmap_churn_lab.zig
 zig run hashmap_churn_lab.zig
-# or
-zig build-exe hashmap_churn_lab.zig && ./hashmap_churn_lab
 ```
 
-`run_lab.py` records: Zig path, version, zig env summary, compile command, run command, compile/run exit status, and whether the harness was actually compiled/run. If no Zig compiler is found, it says so honestly and does not claim validation.
+`run_lab.py` records: Zig path, Zig version, `zig env`, compile/run commands, exit statuses, and whether the harness was actually validated. If no Zig compiler is available, it records that honestly.
 
-Tested with: Zig 0.17.0-dev.1267+300116b02
+Tested with Zig 0.14.0 (Linux x86_64).
 
-## Repo layout
+## Results
 
-- `run.sh` – one-command local footgun runner (Linux/macOS, `./run.sh`)
-- `run.bat` – one-command local footgun runner (Windows Command Prompt, `run.bat`)
-- `run.ps1` – one-command local footgun runner (Windows PowerShell, `.\run.ps1`)
-- `generate_cases.py` – deterministic fake hashmap operation cases
-- `run_lab.py` – finds Zig, generates `hashmap_churn_lab.zig`, compiles/runs, validates, writes RESULTS.md
-- `hashmap_churn_lab.zig` – Zig stdlib harness (generated, deterministic, committed)
-- `cases.json` – generated cases
-- `results_rows.json` / `results_rows.csv` – per-case/per-method results
-- `RESULTS.md` – summary with exact commands, skip matrix, environment info
-- `README.md` – this file
+See [RESULTS.md](RESULTS.md) – includes summary tables, skip matrix, Zig version, compile/run status, and per-case artifacts (`results_rows.csv`, `results_rows.json`).
+
+Correctness before speed. Naive policy (assuming insert-only generalizes, `remove` returns the value, `getOrPut` always overwrites safely, ephemeral string keys are fine, `clearRetainingCapacity` == `clearAndFree`, iteration order is stable, tiny timing proves production performance) – intentionally fails selected cases.
+
+Safe observers only claim local, version-recorded observations and mark broad claims as context-only / not-tested.
+
+## Files
+
+- `generate_cases.py` – deterministic case generator
+- `run_lab.py` – finds Zig, compiles/runs `hashmap_churn_lab.zig`, validates, writes results
+- `hashmap_churn_lab.zig` – Zig stdlib-only harness (Auto-generated, committed)
+- `cases.json` – 50 synthetic cases
+- `RESULTS.md` – summary + Zig version + harness output
+- `results_rows.csv` / `results_rows.json` – per-case/per-method
+- `hn_thread_evidence.md` + `hn_nodes_sanitized.json` + `hn_comments_sanitized.txt` – auditable HN thread evidence
 - `VERIFY.md` – fresh-clone verification transcript
-- `hn_thread_evidence.md` – HN thread sentiment summary with tool access note
-- `hn_nodes_sanitized.json` / `hn_comments_sanitized.txt` – auditable HN evidence
 
-## Zig stdlib hashmap boundaries / version notes
+## What this lab does NOT test
 
-- Tested with Zig 0.17.0-dev (Zig stdlib APIs change – `std.heap.GeneralPurposeAllocator` → `std.heap.SafeAllocator` / `smp_allocator` in 0.17, `std.io.getStdOut()` moved, `std.ArrayHashMap` no longer exported from `std` root – use `std.array_hash_map.Auto`).
-- `std.AutoHashMap` / `std.HashMap` / `StringHashMap` – open-addressing, linear probing.
-- `std.array_hash_map.Auto` (`ArrayHashMap`) – different tradeoffs, preserves insertion order for iteration.
-- `remove(key: K) bool` – returns true if removed.
-- `fetchRemove(key: K) ?KV` – returns key+value if removed.
-- `getOrPut(key: K) !GetOrPutResult` – `found_existing` tells you if you need to initialize `value_ptr`.
-- `clearRetainingCapacity()` – count → 0, capacity kept.
-- `clearAndFree()` – count → 0, memory freed, capacity → 0.
-- String keys: `StringHashMap` stores the slice you pass in – if the backing bytes are ephemeral, you need owned/stable storage.
-- Iterator invalidation: do NOT mutate the map while iterating unless documented safe for your Zig version. This lab marks iterator-mutation as intentionally not run.
-- No concurrent readers/writers in this lab.
+- Factor performance (not run)
+- Huge 2M / 250M-action benchmark (not run)
+- Zig stdlib patches (none)
+- Back-shift deletion algorithms (context only)
+- Stored hash-code designs (not tested)
+- Concurrent hashmaps (not run)
+- Compiler miscompilations (not tested)
+- Production latency (not tested)
+- Hashmap-design debates (not settled)
 
-If a stdlib API is missing on your detected Zig version, cases are marked `not_tested` / `skip` with explanation – no fake results.
+---
 
-## Results (local toy run)
-
-See `RESULTS.md` for full tables.
-
-- Zig validated: yes (0.17.0-dev.1267+300116b02)
-- Cases: 50
-- Methods: 17
-- Pass: 373 / Fail: 107 (naive method intentionally fails delete-heavy / string-ownership / clear-semantics / production-perf cases)
-- No external dataset / no network / no package manager / no Factor / no stdlib patch / no concurrency
-
-**Honest conclusion:** Hashmap behavior depends on workload. Insert-only ≠ delete-heavy churn. Remove/fetchRemove differ. getOrPut needs init checks. clearRetainingCapacity ≠ clearAndFree. String keys need stable storage. ArrayHashMap ≠ AutoHashMap tradeoffs. Local timing ≠ production performance. Toy lab only.
-
-## License
-
-MIT / Public Domain – do what you want, no warranty.
+Toy lab – correctness before performance – synthetic keys only – local Zig version only.

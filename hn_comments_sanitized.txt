@@ -1,126 +1,230 @@
-  [38227693] senderista: I don't see a compelling reason to use tombstones in linear probing except in a concurrent context (where you can't move entries around). The tombstone-free deletion algorithm is quite simple:  https://github.com/senderista/hashtable-benchmarks/blob/mast... . No rehashing is necessary.
+---- 38227693 by senderista ----
+I don't see a compelling reason to use tombstones in linear probing except in a concurrent context (where you can't move entries around). The tombstone-free deletion algorithm is quite simple: https:&#x2F;&#x2F;github.com&#x2F;senderista&#x2F;hashtable-benchmarks&#x2F;blob&#x2F;mast.... No rehashing is necessary.
 
-    [38228959] JacksonAllan: findPreferredBucket rehashes. The problem with this deletion algorithm is that every element that is a candidate for back-shifting must be rehashed to ensure that we don't shift it back beyond its home bucket (unlike in Robin Hood probing, where probe lengths already give us this information). Hence, it is pretty unsuitable when the hash function is expensive, unless we're storing hash codes or ke
+---- 38228959 by JacksonAllan ----
+findPreferredBucket rehashes. The problem with this deletion algorithm is that every element that is a candidate for back-shifting must be rehashed to ensure that we don't shift it back beyond its home bucket (unlike in Robin Hood probing, where probe lengths already give us this information). Hence, it is pretty unsuitable when the hash function is expensive, unless we're storing hash codes or keeping the load factor very low. This image - https:&#x2F;&#x2F;ibb.co&#x2F;xSytxHF - shows a benchmark of a few hash tables with string keys and a maximum load factor of 0.95. Guess which one is using linear probing with back-shift deletion.
 
-      [38231559] senderista: Recalculating the hash codes is indeed potentially expensive. In my example the table stores the hash codes themselves instead of the keys (because the hash function is invertible), so the hash function never needs to be recalculated (just the preferred bucket based on the hash, which is extremely cheap). With a different algorithm (Robin Hood or bidirectional linear probing), the load factor can 
+---- 38231559 by senderista ----
+Recalculating the hash codes is indeed potentially expensive. In my example the table stores the hash codes themselves instead of the keys (because the hash function is invertible), so the hash function never needs to be recalculated (just the preferred bucket based on the hash, which is extremely cheap). With a different algorithm (Robin Hood or bidirectional linear probing), the load factor can be kept well over 90% with good performance, as the benchmarks in the same repo demonstrate.
 
-        [38240609] JacksonAllan: In my example the table stores the hash codes themselves instead of the keys (because the hash function is invertible)  Oh, I see, right. If determining the home bucket is trivial, then the back-shifting method is great. The issue is just that it’s not as much of a general-purpose solution as it may initially seem. In the bad cases, it's  really  bad.  With a different algorithm (Robin Hood or bid
+---- 38240609 by JacksonAllan ----
+In my example the table stores the hash codes themselves instead of the keys (because the hash function is invertible)
+Oh, I see, right. If determining the home bucket is trivial, then the back-shifting method is great. The issue is just that it’s not as much of a general-purpose solution as it may initially seem. In the bad cases, it's really bad.
+With a different algorithm (Robin Hood or bidirectional linear probing), the load factor can be kept well over 90% with good performance, as the benchmarks in the same repo demonstrate.
+I’ve seen the 90% claim made several times in literature on Robin Hood hash tables. In my experience, the claim is a bit exaggerated, although I suppose it depends on what our idea of “good performance” is. See these benchmarks, which again go up to a maximum load factor of 0.95 (although boost and Absl forcibly grow&#x2F;rehash at 0.85-0.9):
+https:&#x2F;&#x2F;strong-starlight-4ea0ed.netlify.app&#x2F;
+Tsl, Martinus, and CC are all Robin Hood tables (https:&#x2F;&#x2F;github.com&#x2F;Tessil&#x2F;robin-map, https:&#x2F;&#x2F;github.com&#x2F;martinus&#x2F;robin-hood-hashing, and https:&#x2F;&#x2F;github.com&#x2F;JacksonAllan&#x2F;CC, respectively). Absl (fro
 
-          [38255940] senderista: Thanks for the benchmark references. I would be curious what you think of my benchmarks of RH and BLP:  https://github.com/senderista/hashtable-benchmarks/wiki/64-b... . BLP performance seems much more stable than RH in general. I haven't directly compared BLP to SIMD designs (since the impl is in Java), but would like to do so at some point. At any rate, I haven't yet found any reason to use RH r
+---- 38255940 by senderista ----
+Thanks for the benchmark references.
+I would be curious what you think of my benchmarks of RH and BLP: https:&#x2F;&#x2F;github.com&#x2F;senderista&#x2F;hashtable-benchmarks&#x2F;wiki&#x2F;64-b.... BLP performance seems much more stable than RH in general. I haven't directly compared BLP to SIMD designs (since the impl is in Java), but would like to do so at some point. At any rate, I haven't yet found any reason to use RH rather than BLP (note that a BLP impl could store preferred bucket index, truncated hash code, distance from preferred bucket, etc., just like RH).
 
-            [38257882] JacksonAllan: As I’m sure you know, benchmarking hash tables is pretty difficult because there’s many variables that affect their performance and it’s hard to cover all use cases. Let me start by explaining the benchmarks I linked you to earlier. Eventually they will be open-sourced and published as part of a comprehensive review of C (and some C++) hash tables, but that’s potentially months away now that there
+---- 38257882 by JacksonAllan ----
+As I’m sure you know, benchmarking hash tables is pretty difficult because there’s many variables that affect their performance and it’s hard to cover all use cases. Let me start by explaining the benchmarks I linked you to earlier. Eventually they will be open-sourced and published as part of a comprehensive review of C (and some C++) hash tables, but that’s potentially months away now that there is a war in Gaza keeping me very busy in my day job.
+The "uint32_t key, uint32_t value" benchmarks test how the hash tables perform when the hash function and key comparison function are inexpensive, traversing buckets is inexpensive (i.e. does not cause many cache misses), and moving elements is cheap. These benchmarks disadvantage tables that store metadata in a separate array (which here are Absl, Boost, Martinus, and Fastmap) because doing so necessarily causes at least one extra cache miss per lookup.
+The "uint64_t key, 256-bit struct" value benchmarks test how the tables perform when the hash function and key comparison function are inexpensive, traversing buckets is expensive (a cache miss per bucket), and moving elements is expensive. These benchmarks disadvantage tables that don’
 
-              [38264271] senderista: Thanks for the details on your benchmarks. I would like sometime to extend BLP to a more generic setting; as I said I think any trick used with RH would also work with BLP. I just used an integer set because that's all I needed for my use case and it was easy to implement several different approaches for benchmarking. As you note, it favors use cases where the hash function is cheap (or invertible
+---- 38264271 by senderista ----
+Thanks for the details on your benchmarks. I would like sometime to extend BLP to a more generic setting; as I said I think any trick used with RH would also work with BLP. I just used an integer set because that's all I needed for my use case and it was easy to implement several different approaches for benchmarking. As you note, it favors use cases where the hash function is cheap (or invertible) and elements are cheap to move around.
+About your question on load factors: no, the benchmarks are measuring exactly what they claim to be. The hash table constructor divides max data size by load factor to get the table size (https:&#x2F;&#x2F;github.com&#x2F;senderista&#x2F;hashtable-benchmarks&#x2F;blob&#x2F;mast...), and the benchmark code instantiates each hash table for exactly the measured data set size and load factor (https:&#x2F;&#x2F;github.com&#x2F;senderista&#x2F;hashtable-benchmarks&#x2F;blob&#x2F;mast...).
+I can't explain the peaks around 1M in many of the plots; I didn't investigate them at the time and I don't have time now. It could be a JVM artifact, but I did try to use JMH "best practices", and there's no dynamic memory allocation or GC happening during the benchmark
 
-                [38272354] JacksonAllan: I'll try to download and play around with your benchmarks when I have a chance. After reading you explanation of how you create the tables at the desired load factor, some of those plots definitely look rather odd to me. What I'd expect to see across all your benchmarks is a bunch of upward curves tapering off at the top (or perhaps just an upward liner lines, given that your horizontal scale is e
+---- 38272354 by JacksonAllan ----
+I'll try to download and play around with your benchmarks when I have a chance. After reading you explanation of how you create the tables at the desired load factor, some of those plots definitely look rather odd to me. What I'd expect to see across all your benchmarks is a bunch of upward curves tapering off at the top (or perhaps just an upward liner lines, given that your horizontal scale is exponential). Basically, the performance of a given table at the same load factor should be fundamentally similar irrespective of how many elements are in the table, except that the higher the count gets, the less frequently the table will benefit from incidental cache hits when consecutive lookups coincidentally hit the same part of the buckets arrays. You can see this in my benchmarks (except for the cumulative "Total time to insert N nonexisting elements" benchmarks and the iteration benchmarks, which are a whole other can of worms). Notice how my peaks grow higher with the element count but tapper off on the right-hand side? In contrast, your plots' data points (which I think should be analogous to the peaks in my graphs) seem to jump around, with the high-element-count points often app
 
-                  [38282843] senderista: Despite my disclaimer about GC (and my effort to use JMH properly), I find it difficult to trust microbenchmarks on the JVM. I don't know when I'll have time for this, but "someday" I'd like to port this whole codebase to Rust/Criterion (which should be straightforward because the algorithms/data structures are "trivial"), and see if the more surprising artifacts persist. I do find the overall dif
+---- 38282843 by senderista ----
+Despite my disclaimer about GC (and my effort to use JMH properly), I find it difficult to trust microbenchmarks on the JVM. I don't know when I'll have time for this, but "someday" I'd like to port this whole codebase to Rust&#x2F;Criterion (which should be straightforward because the algorithms&#x2F;data structures are "trivial"), and see if the more surprising artifacts persist. I do find the overall differentiation between RH and BLP surprising; I expected them to have pretty similar performance profiles.
+In any case, I would definitely appreciate someone else rerunning the benchmarks on a different platform&#x2F;JVM!
 
-    [38227802] adgjlsfhk1: imo a pretty good approach is tombstones where you delete trailing tombstones. that way the tombstones can't overly clog the dictionary but never have to move live objects
+---- 38227802 by adgjlsfhk1 ----
+imo a pretty good approach is tombstones where you delete trailing tombstones. that way the tombstones can't overly clog the dictionary but never have to move live objects
 
-      [38231613] senderista: Here is a simple heuristic for avoiding most tombstones when the load factor isn't too high:  https://arxiv.org/pdf/1808.04602.pdf
+---- 38231613 by senderista ----
+Here is a simple heuristic for avoiding most tombstones when the load factor isn't too high:
+https:&#x2F;&#x2F;arxiv.org&#x2F;pdf&#x2F;1808.04602.pdf
 
-    [38227813] celeritascelery: This is a really cool approach! But if it so obvious, why doesn't every hashmap use it? It seems like there are some trade-offs here that I must be missing.
+---- 38227813 by celeritascelery ----
+This is a really cool approach! But if it so obvious, why doesn't every hashmap use it? It seems like there are some trade-offs here that I must be missing.
 
-      [38227955] Leszek: If you do any kind of probing other than linear probing (e.g. quadratic probing) this approach doesn't work anymore, because your collisions are no longer densely grouped together.
+---- 38227955 by Leszek ----
+If you do any kind of probing other than linear probing (e.g. quadratic probing) this approach doesn't work anymore, because your collisions are no longer densely grouped together.
 
-      [38231662] senderista: The main tradeoff is concurrency: it's difficult to safely read a hash table while its entries are being concurrently relocated. Another tradeoff is (probably) higher average latency (but worst-case latency is much better since there's no global rehashing required).
+---- 38231662 by senderista ----
+The main tradeoff is concurrency: it's difficult to safely read a hash table while its entries are being concurrently relocated. Another tradeoff is (probably) higher average latency (but worst-case latency is much better since there's no global rehashing required).
 
-    [38236386] teo_zero: May I ask why you decided to store the hash instead of the element?
+---- 38236386 by teo_zero ----
+May I ask why you decided to store the hash instead of the element?
 
-      [38256023] senderista: Two reasons: 1. I never need to recalculate the hash in order to find the preferred bucket. 2. The BLP invariant is that entries are strictly ordered by hash code (Robin Hood can actually be reformulated in terms of the same invariant, but it's less efficient because entries with the same preferred bucket can only reside at or after that bucket rather than before, at, or after it). This allows you
+---- 38256023 by senderista ----
+Two reasons:
+1. I never need to recalculate the hash in order to find the preferred bucket.
+2. The BLP invariant is that entries are strictly ordered by hash code (Robin Hood can actually be reformulated in terms of the same invariant, but it's less efficient because entries with the same preferred bucket can only reside at or after that bucket rather than before, at, or after it). This allows you to view a hash table as just a sorted array with gaps, and hash table lookup as interpolation search.
 
-        [38300245] teo_zero: I assume you do a lot of deletions for 1. to be significant. On the other hand, you restrict yourself to a specific class of hashes: reversible and bijective (and never producing a zero for a valid input, although I think this is just how this particular table is built and can be easily changed). This a severe limitation to ever store any data other than integers, e.g. strings. I'm not criticizing
+---- 38300245 by teo_zero ----
+I assume you do a lot of deletions for 1. to be significant. On the other hand, you restrict yourself to a specific class of hashes: reversible and bijective (and never producing a zero for a valid input, although I think this is just how this particular table is built and can be easily changed). This a severe limitation to ever store any data other than integers, e.g. strings.
+I'm not criticizing. I've never implemented a hash table myself and want to learn. I'm just trying to understand what's the trade off you considered that I don't see.
 
-          [38307270] senderista: Using a reversible hash function to store encoded keys is certainly a domain-specific optimization, but integer keys are so common that I don't understand why I don't see this optimization more often. For non-integer keys, you can just store truncated hash codes to eliminate hash function calls in most cases (note that the hash value is needed both to calculate the preferred bucket and to determin
+---- 38307270 by senderista ----
+Using a reversible hash function to store encoded keys is certainly a domain-specific optimization, but integer keys are so common that I don't understand why I don't see this optimization more often. For non-integer keys, you can just store truncated hash codes to eliminate hash function calls in most cases (note that the hash value is needed both to calculate the preferred bucket and to determine the order of entries in that bucket). The smaller the table, the smaller the truncated hash codes can be. When you resize the table, you can increase the truncated hash code size if necessary (one bit for each doubling, which you can amortize by adding a byte every 8 doublings). This of course requires rehashing all keys, but conventional hash tables already rehash all keys on resizing.
 
-  [38227559] lll-o-lll: Hash maps are such a fundamentally important data structure that it comes as a surprise that the Zig implementation is so broken. Good to see it’s getting fixed, but surprising that this wasn’t detected before.
+---- 38227559 by lll-o-lll ----
+Hash maps are such a fundamentally important data structure that it comes as a surprise that the Zig implementation is so broken. Good to see it’s getting fixed, but surprising that this wasn’t detected before.
 
-    [38228361] tialaramex: My impression from the article is that Zig provides several  different  hashtables and not all of them are broken in this way. This reminds me of Aria's comment in her Rust tutorial  https://rust-unofficial.github.io/too-many-lists/  about failing to kill LinkedList. One philosophy (and the one Rust chose) for a stdlib is that this is only where things should live when they're so commonly needed t
+---- 38228361 by tialaramex ----
+My impression from the article is that Zig provides several different hashtables and not all of them are broken in this way.
+This reminds me of Aria's comment in her Rust tutorial https:&#x2F;&#x2F;rust-unofficial.github.io&#x2F;too-many-lists&#x2F; about failing to kill LinkedList. One philosophy (and the one Rust chose) for a stdlib is that this is only where things should live when they're so commonly needed that essentially everybody needs them either directly or to talk about. So, HashTable is needed by so much otherwise unrelated software that qualifies, BloomFilter, while it's real useful for some people, not so much. Aria cleaned out Rust's set of standard library containers before Rust 1.0, trying to keep only those most people would need. LinkedList isn't a good general purpose data structure, but, it was too popular and Aria was not able to remove it.
+Having multiple hash tables feels like a win (they're optimized for different purposes) but may cost too much in terms of the necessary testing to ensure they all hit the quality you want.
 
-      [38228843] otabdeveloper4: Linked lists are necessary when you have structures that can't be moved. Very important in a highly concurrent or lockfree environment.
+---- 38228843 by otabdeveloper4 ----
+Linked lists are necessary when you have structures that can't be moved. Very important in a highly concurrent or lockfree environment.
 
-        [38229138] iudqnolq: How could you use the  Rust standard library's  linked list for that?
+---- 38229138 by iudqnolq ----
+How could you use the Rust standard library's linked list for that?
 
-        [38231182] KerrAvon: A deque will usually work just as well in that environment and it will always have better general performance characteristics. There are very few legitimate uses of linked lists.
+---- 38231182 by KerrAvon ----
+A deque will usually work just as well in that environment and it will always have better general performance characteristics. There are very few legitimate uses of linked lists.
 
-          [38233000] otabdeveloper4: A deque is a doubly-linked list under the hood.
+---- 38231913 by ? ----
 
-            [38236344] adgjlsfhk1: Array based deques are very common (and usually much faster). Doubly linked lists are absolutely awful for memory locality.
 
-        [38229081] boxed: Can't you have a list of pointers instead?
+---- 38233000 by otabdeveloper4 ----
+A deque is a doubly-linked list under the hood.
 
-          [38229507] xgstation: Resizing/deleting items in list in most implementations are either not lock free or not threadsafe
+---- 38236344 by adgjlsfhk1 ----
+Array based deques are very common (and usually much faster). Doubly linked lists are absolutely awful for memory locality.
 
-            [38230138] chmod775: Yeah, but what if you just use smaller lists and point to the next/previous list? Hold on...
+---- 38229081 by boxed ----
+Can't you have a list of pointers instead?
 
-            [38248880] boxed: Linked lists aren't either so....?
+---- 38229507 by xgstation ----
+Resizing&#x2F;deleting items in list in most implementations are either not lock free or not threadsafe
 
-    [38228826] AndyKelley: I personally have two habits that made me not notice: 1. I generally prefer ArrayHashMap 2. I tend to not delete things from hash maps
+---- 38230138 by chmod775 ----
+Yeah, but what if you just use smaller lists and point to the next&#x2F;previous list?
+Hold on...
 
-    [38230014] liftm: It's surprisingly common for fledgling programming languages…  cough   https://accidentallyquadratic.tumblr.com/post/153545455987/r...  (I know  https://news.ycombinator.com/item?id=38138223 , but at least I'm not the first one this time.)
+---- 38248880 by boxed ----
+Linked lists aren't either so....?
 
-    [38228058] murkt: Not that many hashmaps see hundreds of millions of entries in their lifetime. Given that Zig isn’t widely used, it’s probable that noone has really stumbled upon this behaviour in a non-benchmark setting.
+---- 38228826 by AndyKelley ----
+I personally have two habits that made me not notice:
+1. I generally prefer ArrayHashMap
+2. I tend to not delete things from hash maps
 
-      [38228308] shemii: Actually it seems according to the issue that TigerBeetle (one of the bigger zig projects out there) noticed this issue [1]. It's also on their issue tracker [2]. [1]  https://github.com/ziglang/zig/issues/17851  [2]  https://github.com/tigerbeetle/tigerbeetle/issues/1191
+---- 38230014 by liftm ----
+It's surprisingly common for fledgling programming languages… cough https:&#x2F;&#x2F;accidentallyquadratic.tumblr.com&#x2F;post&#x2F;153545455987&#x2F;r...
+(I know https:&#x2F;&#x2F;news.ycombinator.com&#x2F;item?id=38138223, but at least I'm not the first one this time.)
 
-        [38228392] brabel: When you use a language that's in alpha- (maybe beta- now?) stage, this kind of thing should be expected.
+---- 38228058 by murkt ----
+Not that many hashmaps see hundreds of millions of entries in their lifetime. Given that Zig isn’t widely used, it’s probable that noone has really stumbled upon this behaviour in a non-benchmark setting.
+
+---- 38228308 by shemii ----
+Actually it seems according to the issue that TigerBeetle (one of the bigger zig projects out there) noticed this issue [1]. It's also on their issue tracker [2].
+[1] https:&#x2F;&#x2F;github.com&#x2F;ziglang&#x2F;zig&#x2F;issues&#x2F;17851
+[2] https:&#x2F;&#x2F;github.com&#x2F;tigerbeetle&#x2F;tigerbeetle&#x2F;issues&#x2F;1191
+
+---- 38228392 by brabel ----
+When you use a language that's in alpha- (maybe beta- now?) stage, this kind of thing should be expected.
 Even with the latest version of Zig, perfectly correct programs can segfault due to miscompilation, so performance issues are not even the biggest worry you should have.
 
-          [38228426] shemii: One thing I really don't unserstand is how bun already reached stability with it's 1.0 release ( https://bun.sh/blog/bun-v1.0 ) while being written in Zig, which still hasn't reached it's 1.0 release.
+---- 38228426 by shemii ----
+One thing I really don't unserstand is how bun already reached stability with it's 1.0 release (https:&#x2F;&#x2F;bun.sh&#x2F;blog&#x2F;bun-v1.0) while being written in Zig, which still hasn't reached it's 1.0 release.
 
-            [38229650] brabel: If you test your software built on Zig close to 100% then you can be pretty confident you didn't run into any of the Zig compiler bugs. Bun has certainly run into them but they can almost always be worked around... if you work around all problems and manage to catch everything then yeah, you can have an application that's production worthy while being built on a compiler that's not quite there yet
+---- 38229650 by brabel ----
+If you test your software built on Zig close to 100% then you can be pretty confident you didn't run into any of the Zig compiler bugs. Bun has certainly run into them but they can almost always be worked around... if you work around all problems and manage to catch everything then yeah, you can have an application that's production worthy while being built on a compiler that's not quite there yet.
+The problem is, of course, you almost certainly didn't test anything near 100% and probably not even everything users may do with your software, so it's a risky bet.
 
-            [38228660] kreetx: Versioning isn’t an exact science, and people use whatever they see fit, both for technical but also marketing purposes.
+---- 38228660 by kreetx ----
+Versioning isn’t an exact science, and people use whatever they see fit, both for technical but also marketing purposes.
 
-            [38228463] fastball: Bun is compiled to a binary, so not sure it matters how stable the underlying language is if Bun itself has a stable API?
+---- 38228463 by fastball ----
+Bun is compiled to a binary, so not sure it matters how stable the underlying language is if Bun itself has a stable API?
 
-              [38229192] KolmogorovComp: That’s the point OP is making, even if the program is bug-free, given the compiler’s current state there’s a chance the compiled binary has bugs (due to miscompilation). Now that can happen with every compiler but using one in still in alpha significantly increases the risk.
+---- 38229192 by KolmogorovComp ----
+That’s the point OP is making, even if the program is bug-free, given the compiler’s current state there’s a chance the compiled binary has bugs (due to miscompilation).
+Now that can happen with every compiler but using one in still in alpha significantly increases the risk.
 
-                [38231070] fastball: Does it help at all that Zig is LLVM-based?
+---- 38231070 by fastball ----
+Does it help at all that Zig is LLVM-based?
 
-                  [38231546] wredue: Not particularly. And zig is moving away from llvm anyway.
+---- 38231546 by wredue ----
+Not particularly. And zig is moving away from llvm anyway.
 
-            [38230037] losvedir: If we're talking SemVer then 1.0 only means a commitment to a public interface. It doesn't mean the code has no more bugs and ready for use in a spaceship. Conversely, taking on a dependency prior to its 1.0 just means you're on the hook for dealing with API changes as they come up. But as long as the API  you  expose doesn't change, it's fine to be on 1.0 yourself.
+---- 38230037 by losvedir ----
+If we're talking SemVer then 1.0 only means a commitment to a public interface. It doesn't mean the code has no more bugs and ready for use in a spaceship.
+Conversely, taking on a dependency prior to its 1.0 just means you're on the hook for dealing with API changes as they come up. But as long as the API you expose doesn't change, it's fine to be on 1.0 yourself.
 
-          [38229049] kprotty: Are there any links / examples for the miscompilations?
+---- 38229049 by kprotty ----
+Are there any links &#x2F; examples for the miscompilations?
 
-            [38229310] KolmogorovComp: Zig’s issue tracker list them [0]. [0]:  https://github.com/ziglang/zig/issues?q=is%3Aopen+is%3Aissue...
+---- 38229310 by KolmogorovComp ----
+Zig’s issue tracker list them [0].
+[0]: https:&#x2F;&#x2F;github.com&#x2F;ziglang&#x2F;zig&#x2F;issues?q=is%3Aopen+is%3Aissue...
 
-              [38243604] kprotty: Thanks, seems like most are from LLVM or packed structs.
+---- 38243604 by kprotty ----
+Thanks, seems like most are from LLVM or packed structs.
 
-    [38230933] 29athrowaway: Zig is rather new, so it doesn't surprise me.
+---- 38230933 by 29athrowaway ----
+Zig is rather new, so it doesn't surprise me.
 
-  [38227752] Dwedit: So in other words, bug in Zig library causes linear execution time on something that isn't supposed to be linear.
+---- 38227752 by Dwedit ----
+So in other words, bug in Zig library causes linear execution time on something that isn't supposed to be linear.
 
-  [38228140] chmod600: Factor looks cool, but what's it really about? Can someone who loves the language explain why?
+---- 38228140 by chmod600 ----
+Factor looks cool, but what's it really about? Can someone who loves the language explain why?
 
-    [38230749] mrjbq7: I'm a bit biased as I've been working on and with Factor for 15 years and I am also the author of the linked article and "Re: Factor" blog. I find Factor to have a compelling sweet spot of concise syntax, dynamic features, and (relatively) high performance. But in particular, I think we've done a good job with a few things: 1) Making the language very "clickable", so you can introspect and dig dow
+---- 38230749 by mrjbq7 ----
+I'm a bit biased as I've been working on and with Factor for 15 years and I am also the author of the linked article and "Re: Factor" blog.
+I find Factor to have a compelling sweet spot of concise syntax, dynamic features, and (relatively) high performance. But in particular, I think we've done a good job with a few things:
+1) Making the language very "clickable", so you can introspect and dig down into all function and type definitions.
+2) Provide a lot of batteries-included in the standard library.
+3) Make it super easy to accept contributions, there's a part of the distribution that is "extra" and has low barrier to entry and then we commit to keeping code working and promoting things to the main standard library when they are useful&#x2F;documented&#x2F;tested enough.
 
-      [38231445] broken-kebab: I always suspected that Factor appeared as an attempt to re-live Forth magic, but at higher level, more applicable outside of embedded domain
+---- 38231445 by broken-kebab ----
+I always suspected that Factor appeared as an attempt to re-live Forth magic, but at higher level, more applicable outside of embedded domain
 
-    [38228183] m031: Found this page on that subject:  https://concatenative.org/wiki/view/Factor/FAQ/Why%3F
+---- 38228183 by m031 ----
+Found this page on that subject: https:&#x2F;&#x2F;concatenative.org&#x2F;wiki&#x2F;view&#x2F;Factor&#x2F;FAQ&#x2F;Why%3F
 
-    [38229348] Avshalom: It's as flexible as commonlisp or smalltalk.
+---- 38229348 by Avshalom ----
+It's as flexible as commonlisp or smalltalk.
 
-  [38231285] zelphirkalt: Not a good showcase of Factor code. All variable names 1 letter, seemingly simply chosen subsequent letters in the alphabet, instead of any names, that would indicate what the code does.
+---- 38231285 by zelphirkalt ----
+Not a good showcase of Factor code. All variable names 1 letter, seemingly simply chosen subsequent letters in the alphabet, instead of any names, that would indicate what the code does.
 
-    [38231336] mrjbq7: I agree, I've written much better Factor code. This was mainly to get a matching test case working simply...
+---- 38231336 by mrjbq7 ----
+I agree, I've written much better Factor code. This was mainly to get a matching test case working simply...
 
-  [38224052] kencausey: Title is a bit clickbait.  This is regarding Hashmaps specifically.  Read or at least scan through it where the author will submit a fix for the Zig implementation resulting in Zig's Hashmap being 50% faster than the Factor implementation.
+---- 38229725 by ? ----
 
-    [38226071] dang: I've edited the title to make that clearer. Thanks!
 
-      [38227904] sirmike_: [flagged]
+---- 38224052 by kencausey ----
+Title is a bit clickbait.  This is regarding Hashmaps specifically.  Read or at least scan through it where the author will submit a fix for the Zig implementation resulting in Zig's Hashmap being 50% faster than the Factor implementation.
 
-        [38228031] froh: [flagged]
+---- 38226071 by dang ----
+I've edited the title to make that clearer. Thanks!
 
-  [38227706] benatkin: Why hashmaps? Python has named tuples. Oh - this puts a lot of keys into one hashmap, not a ton of objects with the same keys. :)
+---- 38227904 by sirmike_ ----
+[flagged]
 
-    [38227806] murkt: Python also has dicts.
+---- 38228031 by froh ----
+[flagged]
 
-      [38227869] benatkin: Of course. I was just saying that a lot of the time hashmaps don't get very many entries. There is serialization and deserialization where Cap'n Proto, Flatbuffers, and Protocol Buffers have a savings over JSON by not repeating key names of a list of maps.
+---- 38227706 by benatkin ----
+Why hashmaps? Python has named tuples.
+Oh - this puts a lot of keys into one hashmap, not a ton of objects with the same keys. :)
 
-        [38228052] murkt: I fail to see how is this relevant to the article. HashMap/dict can as well store a mapping from an integer to an integer. Or from a token to an integer, or whatever, and it has nothing to do with serialization, JSON inefficiency or lists of maps.
+---- 38227806 by murkt ----
+Python also has dicts.
 
-        [38228057] asplake: Use the structure that best fits the problem. The saving to which you refer applies only to serialisation, not to the use of the structure by an algorithm.
+---- 38227869 by benatkin ----
+Of course.
+I was just saying that a lot of the time hashmaps don't get very many entries.
+There is serialization and deserialization where Cap'n Proto, Flatbuffers, and Protocol Buffers have a savings over JSON by not repeating key names of a list of maps.
+
+---- 38228052 by murkt ----
+I fail to see how is this relevant to the article. HashMap&#x2F;dict can as well store a mapping from an integer to an integer. Or from a token to an integer, or whatever, and it has nothing to do with serialization, JSON inefficiency or lists of maps.
+
+---- 38228057 by asplake ----
+Use the structure that best fits the problem. The saving to which you refer applies only to serialisation, not to the use of the structure by an algorithm.
+

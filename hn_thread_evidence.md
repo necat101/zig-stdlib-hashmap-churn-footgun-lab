@@ -1,34 +1,44 @@
 # HN Thread Evidence – zig-stdlib-hashmap-churn-footgun-lab
 
-**Thread:** "Hashmaps in Factor are faster than in Zig"  
-**HN ID:** 38224033  
-**URL:** https://news.ycombinator.com/item?id=38224033  
-**Accessed via:** Hacker News Firebase API CLI (`openclaw/dist/extensions/hackernews/skills/hackernews/hackernews get-item`)  
-**Date accessed:** 2026-07-07
+HN story: https://news.ycombinator.com/item?id=38224033  
+Title: "Hashmaps in Factor are faster than in Zig"  
+Score: 180, Descendants: 61  
+URL: https://re.factorcode.org/2023/11/factor-is-faster-than-zig.html
 
-Raw thread JSON saved as: `hn_nodes_sanitized.json`
+Accessed via the bundled Hacker News CLI (`openclaw skills hackernews`), 2026-07-08.
 
-## Sentiment summary (own words, no invented quotes)
+Full comment tree saved as:
+- `hn_nodes_sanitized.json` (66 nodes, raw HN Firebase API output)
+- `hn_comments_sanitized.txt` (text-only, tags stripped)
 
-The linked article found Zig std.HashMap getting slower over time under repeated insert/remove churn, attributed to tombstone accumulation in its linear-probing table. HN discussion expanded well beyond "Factor vs Zig":
+## Thread sentiment summary (used for README)
 
-- **Tombstones / deletion churn:** Multiple commenters discussed why repeated remove/reinsert causes slowdown, tombstone buildup, and why deletion is the hard part of open-addressing hash tables.
-- **Back-shift deletion / rehashing:** Commenters debated tombstone-free deletion (back-shift / backward-shift deletion, Robin Hood / backward linear probing), tradeoffs of moving entries on delete vs leaving tombstones, and rehashing costs.
-- **Expensive hash functions / stored hashes:** Discussion about storing hash codes with entries to avoid recomputing expensive hashes, truncated hash codes, reversible hashes for integer keys, and the tradeoff of extra memory.
-- **Load factor:** Load factor came up as a key tuning knob affecting probe length and tombstone density.
-- **Concurrency / moving entries:** One major tradeoff repeatedly noted: back-shift deletion / compacting entries makes concurrent readers unsafe, since entries move. Tombstones avoid moving live objects, which helps concurrency.
-- **ArrayHashMap:** Andy Kelley (Zig creator) commented that he personally prefers ArrayHashMap and tends not to delete from hash maps – explaining why the churn footgun wasn't noticed earlier. Other commenters noted Zig provides several *different* hash tables, not one universal table.
-- **Surprise at stdlib issue:** Some commenters were surprised a stdlib hashmap could have this performance cliff. Others responded that Zig is pre-1.0 / still maturing, and that hashmap edge cases are common in young languages (Rust quadratic reinsertion bug was cited).
-- **TigerBeetle:** TigerBeetle (a major Zig project) was noted as having hit this issue in production, filed at ziglang/zig#17851 and tigerbeetle/tigerbeetle#1191.
-- **Compiler / language stability:** Discussion branched into Zig compiler maturity – miscompilation bugs still open, Zig being pre-1.0, and how Bun shipped 1.0 while built on pre-1.0 Zig. Versioning / SemVer expectations came up.
-- **"My tiny benchmark saw X" vs global claims:** The OP (mrjbq7, Factor maintainer) clarified the article was about a specific repeated insert/delete workload, and that after a fix, Zig's HashMap was 50% faster than Factor's. Commenters generally treated this as a workload-specific footgun, not proof that "all Zig hash maps are slow" or "Factor is universally faster."
+Commenters debated the Zig `std.HashMap` churn slowdown reported in the linked Factor article (repeated insert/delete workload, tombstone accumulation in linear probing).
 
-The discussion was technical and nuanced – about deletion algorithms, rehashing, hash code storage, load factor, container design tradeoffs, stdlib maturity expectations, and the difference between a local churn benchmark and production hashmap performance claims.
+Key themes from the actual thread:
 
-This lab does NOT reproduce the 2M-entry / 250M-action Factor benchmark, does NOT patch Zig stdlib, does NOT test Factor, and does NOT claim production performance conclusions. It is a tiny toy correctness/safety lab turning the HN debate themes into reproducible local observations.
+- **Tombstones / deletion churn:** Top comment (senderista) – "I don't see a compelling reason to use tombstones in linear probing except in a concurrent context (where you can't move entries around). The tombstone-free deletion algorithm is quite simple". Others discussed trailing-tombstone deletion, and a heuristic for avoiding most tombstones when load factor isn't too high (arxiv.org/pdf/1808.04602.pdf).
 
-## Evidence artifacts committed
+- **Back-shift deletion / rehashing:** JacksonAllan replied that back-shift deletion requires rehashing every candidate to avoid shifting beyond its home bucket (unlike Robin Hood). "Hence, it is pretty unsuitable when the hash function is expensive, unless we're storing hash codes or keeping the load factor very low."
 
-- `hn_thread_evidence.md` (this file)
-- `hn_nodes_sanitized.json` – full thread tree from HN API, sanitized (ids, authors, text, timestamps)
-- `hn_comments_sanitized.txt` – (generated below if missing)
+- **Expensive hash functions / load factor:** String-key benchmarks at 0.95 load factor were cited. Robin Hood maps "spike upwards dramatically as the load factor gets high, becoming as much as 5-6 times slower at 0.95 vs 0.5". SIMD maps (Boost, Absl) and a Fastmap design were "mostly immune to load factor".
+
+- **Concurrency / moving entries:** senderista: "The main tradeoff is concurrency: it's difficult to safely read a hash table while its entries are being concurrently relocated. Another tradeoff is (probably) higher average latency (but worst-case latency is much better since there's no global rehashing required)."
+
+- **ArrayHashMap:** Andy Kelley (Zig creator, user AndyKelley) commented directly: "I personally have two habits that made me not notice: 1. I generally prefer ArrayHashMap 2. I tend to not delete things from hash maps"
+
+- **Multiple hash-table types in Zig:** tialaramex: "My impression from the article is that Zig provides several different hashtables and not all of them are broken in this way." Discussion about stdlib container design tradeoffs, Rust LinkedList analogy.
+
+- **Surprise at stdlib issue:** lll-o-lll: "Hash maps are such a fundamentally important data structure that it comes as a surprise that the Zig implementation is so broken. Good to see it's getting fixed, but surprising that this wasn't detected before."
+
+- **Pre-1.0 / maturity expectations:** brabel: "When you use a language that's in alpha- (maybe beta- now?) stage, this kind of thing should be expected. Even with the latest version of Zig, perfectly correct programs can segfault due to miscompilation, so performance issues are not even the biggest worry you should have."
+
+- **TigerBeetle:** shemii: "Actually it seems according to the issue that TigerBeetle (one of the bigger zig projects out there) noticed this issue" – links to ziglang/zig#17851 and tigerbeetle/tigerbeetle#1191.
+
+- **Compiler / language stability:** Above brabel comment, plus discussion about Bun reaching 1.0 while being written in Zig which hasn't reached 1.0. Reply: Bun can work around compiler bugs with close to 100% test coverage, but "it's a risky bet".
+
+- **Benchmark scope caveat:** murkt: "Not that many hashmaps see hundreds of millions of entries in their lifetime. Given that Zig isn't widely used, it's probable that noone has really stumbled upon this behaviour in a non-benchmark setting." liftm linked Rust's accidentally-quadratic hash iteration reinsertion – "surprisingly common for fledgling programming languages".
+
+- **"my tiny local churn benchmark saw X" vs global claims:** Extensive sub-thread between senderista and JacksonAllan debating Robin Hood vs BLP (bidirectional linear probing), benchmark methodology, load factor measurement intervals, key types (integer keys favor open-addressing), hash function cost, moving elements cost, cache misses, JVM microbenchmark trust issues. Both agreed "benchmarking hash tables is pretty difficult because there's many variables that affect their performance and it's hard to cover all use cases."
+
+All of the above is reflected in this lab's README "Hacker News thread sentiments" section. No quotes are invented – summaries are derived from the saved HN API output.
